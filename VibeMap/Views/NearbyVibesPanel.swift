@@ -100,27 +100,36 @@ struct NearbyVibesPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 14)
         } else {
-            ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    if !opinionPlaces.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(opinionPlaces) { place in
-                                placeButton(for: place, isDiscoveryRow: true)
+            ZStack(alignment: .bottomTrailing) {
+                ScrollView(.vertical, showsIndicators: hasScrollableNearbyContent) {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        if !opinionPlaces.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(opinionPlaces) { place in
+                                    placeButton(for: place, isDiscoveryRow: true)
+                                }
+                            }
+                        }
+
+                        if !nearbyPlaces.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(opinionPlaces.isEmpty ? "Nearby vibes" : "More nearby")
+                                    .font(.subheadline.weight(.black))
+                                    .foregroundStyle(VibeDesign.primaryText)
+
+                                ForEach(nearbyPlaces) { place in
+                                    placeButton(for: place, isDiscoveryRow: false)
+                                }
                             }
                         }
                     }
+                    .padding(.bottom, hasScrollableNearbyContent ? 18 : 0)
+                }
+                .scrollIndicators(hasScrollableNearbyContent ? .visible : .hidden)
+                .scrollBounceBehavior(.basedOnSize)
 
-                    if !nearbyPlaces.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(opinionPlaces.isEmpty ? "Nearby vibes" : "More nearby")
-                                .font(.subheadline.weight(.black))
-                                .foregroundStyle(VibeDesign.primaryText)
-
-                            ForEach(nearbyPlaces) { place in
-                                placeButton(for: place, isDiscoveryRow: false)
-                            }
-                        }
-                    }
+                if hasScrollableNearbyContent {
+                    scrollCue
                 }
             }
             .frame(height: listHeight)
@@ -191,13 +200,45 @@ struct NearbyVibesPanel: View {
     }
 
     private var listHeight: CGFloat {
-        let rowCount = opinionPlaces.count + nearbyPlaces.count
-        guard rowCount > 0 else { return 0 }
+        min(listContentHeight, maxExpandedListHeight)
+    }
+
+    private var listContentHeight: CGFloat {
+        guard displayedPlaceCount > 0 else { return 0 }
 
         let sectionCount = nearbyPlaces.isEmpty || opinionPlaces.isEmpty ? 1 : 2
         let rowHeight: CGFloat = 96
-        let contentHeight = CGFloat(rowCount) * rowHeight + CGFloat(max(rowCount - 1, 0)) * 8 + CGFloat(sectionCount) * 28
-        return min(contentHeight, maxExpandedListHeight)
+        return CGFloat(displayedPlaceCount) * rowHeight
+            + CGFloat(max(displayedPlaceCount - 1, 0)) * 8
+            + CGFloat(sectionCount) * 28
+    }
+
+    private var displayedPlaceCount: Int {
+        opinionPlaces.count + nearbyPlaces.count
+    }
+
+    private var hasScrollableNearbyContent: Bool {
+        displayedPlaceCount > 3 && listContentHeight > listHeight + 1
+    }
+
+    private var scrollCue: some View {
+        HStack(spacing: 4) {
+            Text("More")
+            Image(systemName: "chevron.down")
+        }
+        .font(.caption2.weight(.black))
+        .foregroundStyle(VibeDesign.primary)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(VibeDesign.sheetBackground.opacity(0.94), in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(VibeDesign.hairline, lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+        .padding(.trailing, 8)
+        .padding(.bottom, 6)
+        .allowsHitTesting(false)
     }
 
     private var maxExpandedListHeight: CGFloat {

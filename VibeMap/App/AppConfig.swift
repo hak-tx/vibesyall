@@ -41,7 +41,7 @@ enum AppConfig {
     static let nearbyMemoryCacheLimit = 48
     static let mapCellMemoryCacheTTL: TimeInterval = 10 * 60
     static let mapCellMemoryCacheLimit = 80
-    static let nearbyReloadDebounce: Duration = .milliseconds(140)
+    static let nearbyReloadDebounce: Duration = .milliseconds(220)
     static let initialUserMapDistanceMeters: CLLocationDistance = 50_000
     static let currentLocationMapDistanceMeters: CLLocationDistance = 12_000
 

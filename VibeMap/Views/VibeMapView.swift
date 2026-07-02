@@ -259,15 +259,8 @@ struct VibeMapView: View {
     }
 
     private func centerOnCurrentLocation() {
+        shouldCenterOnNextLocation = true
         viewModel.requestCurrentLocation()
-
-        guard let coordinate = viewModel.locationService.lastKnownCoordinate else {
-            shouldCenterOnNextLocation = true
-            return
-        }
-
-        hasCenteredOnInitialUserLocation = true
-        centerMap(on: coordinate, distance: AppConfig.currentLocationMapDistanceMeters)
     }
 
     private func handleMapBackgroundTap() {

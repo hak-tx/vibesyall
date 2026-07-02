@@ -37,8 +37,12 @@ final class VibeMapViewModel: ObservableObject {
     private var visibleRadius = AppConfig.nearbyRadiusMeters
     private var activeMapTapRequestID: UUID?
     private var activeNearbyRequestID: UUID?
+    private var activeNearbyRequestKey: String?
     private var shouldCheckAccountAfterRating = false
     private var currentNearbyCacheKey: String?
+    private var currentMapCellCacheKey: String?
+    private var displayedNearbySignature = ""
+    private var displayedMapCellSignature = ""
     private var nearbyCache: [String: NearbyCacheEntry] = [:]
     private var nearbyCacheOrder: [String] = []
     private var mapCellCache: [String: MapCellCacheEntry] = [:]
@@ -156,24 +160,55 @@ final class VibeMapViewModel: ObservableObject {
             )
         let cachedNearbyEntry = usesMapCells ? nil : nearbyCache[cacheKey]
         let cachedMapCellEntry = usesMapCells ? mapCellCache[cacheKey] : nil
-        let requestID = UUID()
-        activeNearbyRequestID = requestID
-        currentNearbyCacheKey = usesMapCells ? nil : cacheKey
+        let now = Date()
+        let hasFreshNearbyCache = cachedNearbyEntry.map { now.timeIntervalSince($0.loadedAt) <= AppConfig.nearbyMemoryCacheTTL } ?? false
+        let hasFreshMapCellCache = cachedMapCellEntry.map { now.timeIntervalSince($0.loadedAt) <= AppConfig.mapCellMemoryCacheTTL } ?? false
         visibleCenter = coordinate
         visibleRadius = queryRadius
-        nearbyError = nil
-        isLoadingNearby = usesMapCells ? cachedMapCellEntry == nil : cachedNearbyEntry == nil
+        setNearbyError(nil)
+
+        if usesMapCells,
+           let cachedMapCellEntry,
+           hasFreshMapCellCache,
+           displayedAnnotationLayer == .mapCells,
+           currentMapCellCacheKey == cacheKey,
+           displayedMapCellSignature == Self.mapCellSignature(cachedMapCellEntry.clusters) {
+            cancelActiveNearbyRequest()
+            setIsLoadingNearby(false)
+            return
+        }
+
+        if !usesMapCells,
+           let cachedNearbyEntry,
+           hasFreshNearbyCache,
+           displayedAnnotationLayer == .nearby,
+           currentNearbyCacheKey == cacheKey,
+           displayedNearbySignature == Self.nearbySignature(cachedNearbyEntry.places) {
+            cancelActiveNearbyRequest()
+            setIsLoadingNearby(false)
+            return
+        }
+
+        guard activeNearbyRequestKey != cacheKey else {
+            return
+        }
+
+        let requestID = UUID()
+        activeNearbyRequestID = requestID
+        activeNearbyRequestKey = cacheKey
+        setIsLoadingNearby(usesMapCells ? cachedMapCellEntry == nil : cachedNearbyEntry == nil)
         defer {
             if activeNearbyRequestID == requestID {
-                isLoadingNearby = false
+                setIsLoadingNearby(false)
                 activeNearbyRequestID = nil
+                activeNearbyRequestKey = nil
             }
         }
 
         if usesMapCells {
             if let cachedMapCellEntry {
-                applyMapCellClusters(cachedMapCellEntry.clusters)
-                guard Date().timeIntervalSince(cachedMapCellEntry.loadedAt) > AppConfig.mapCellMemoryCacheTTL else {
+                applyMapCellClusters(cachedMapCellEntry.clusters, cacheKey: cacheKey)
+                guard !hasFreshMapCellCache else {
                     return
                 }
             }
@@ -188,13 +223,13 @@ final class VibeMapViewModel: ObservableObject {
                 )
                 guard activeNearbyRequestID == requestID else { return }
                 cacheMapCellClusters(clusters, for: cacheKey)
-                applyMapCellClusters(clusters)
+                applyMapCellClusters(clusters, cacheKey: cacheKey)
             } catch is CancellationError {
                 return
             } catch {
                 guard activeNearbyRequestID == requestID else { return }
                 if cachedMapCellEntry == nil {
-                    nearbyError = error.localizedDescription
+                    setNearbyError(error.localizedDescription)
                 }
             }
 
@@ -202,8 +237,8 @@ final class VibeMapViewModel: ObservableObject {
         }
 
         if let cachedNearbyEntry {
-            applyNearbyPlaces(cachedNearbyEntry.places)
-            guard Date().timeIntervalSince(cachedNearbyEntry.loadedAt) > AppConfig.nearbyMemoryCacheTTL else {
+            applyNearbyPlaces(cachedNearbyEntry.places, cacheKey: cacheKey)
+            guard !hasFreshNearbyCache else {
                 return
             }
         }
@@ -218,13 +253,13 @@ final class VibeMapViewModel: ObservableObject {
             )
             guard activeNearbyRequestID == requestID else { return }
             cacheNearbyPlaces(places, for: cacheKey)
-            applyNearbyPlaces(places)
+            applyNearbyPlaces(places, cacheKey: cacheKey)
         } catch is CancellationError {
             return
         } catch {
             guard activeNearbyRequestID == requestID else { return }
             if cachedNearbyEntry == nil {
-                nearbyError = error.localizedDescription
+                setNearbyError(error.localizedDescription)
             }
         }
 
@@ -518,17 +553,88 @@ final class VibeMapViewModel: ObservableObject {
         }
     }
 
-    private func applyNearbyPlaces(_ places: [VibePlace]) {
-        nearbyPlaces = places
-        displayedAnnotationLayer = .nearby
-        mapCellClusters = []
+    private func applyNearbyPlaces(_ places: [VibePlace], cacheKey: String? = nil) {
+        let signature = Self.nearbySignature(places)
+        guard displayedAnnotationLayer != .nearby || displayedNearbySignature != signature else {
+            if let cacheKey {
+                currentNearbyCacheKey = cacheKey
+            }
+            return
+        }
+
+        if displayedNearbySignature != signature {
+            nearbyPlaces = places
+            displayedNearbySignature = signature
+        }
+        if displayedAnnotationLayer != .nearby {
+            displayedAnnotationLayer = .nearby
+        }
+        if !mapCellClusters.isEmpty {
+            mapCellClusters = []
+        }
+        displayedMapCellSignature = ""
+        if let cacheKey {
+            currentNearbyCacheKey = cacheKey
+        }
+        currentMapCellCacheKey = nil
         syncContributedPlaces(from: places)
         enrichNearbyAddressesIfNeeded(places)
     }
 
-    private func applyMapCellClusters(_ clusters: [MapCellCluster]) {
-        mapCellClusters = clusters
-        displayedAnnotationLayer = .mapCells
+    private func applyMapCellClusters(_ clusters: [MapCellCluster], cacheKey: String? = nil) {
+        let signature = Self.mapCellSignature(clusters)
+        guard displayedAnnotationLayer != .mapCells || displayedMapCellSignature != signature else {
+            if let cacheKey {
+                currentMapCellCacheKey = cacheKey
+            }
+            return
+        }
+
+        if displayedMapCellSignature != signature {
+            mapCellClusters = clusters
+            displayedMapCellSignature = signature
+        }
+        if displayedAnnotationLayer != .mapCells {
+            displayedAnnotationLayer = .mapCells
+        }
+        if let cacheKey {
+            currentMapCellCacheKey = cacheKey
+        }
+        currentNearbyCacheKey = nil
+    }
+
+    private func cancelActiveNearbyRequest() {
+        activeNearbyRequestID = nil
+        activeNearbyRequestKey = nil
+    }
+
+    private func setIsLoadingNearby(_ value: Bool) {
+        guard isLoadingNearby != value else { return }
+        isLoadingNearby = value
+    }
+
+    private func setNearbyError(_ value: String?) {
+        guard nearbyError != value else { return }
+        nearbyError = value
+    }
+
+    private static func nearbySignature(_ places: [VibePlace]) -> String {
+        places.map { place in
+            let topVibes = place.stats?.visibleTopVibes.prefix(3).map {
+                "\($0.vibeTag.rawValue):\($0.count):\($0.percentage)"
+            }
+            .joined(separator: ",") ?? ""
+            let selectedVibes = place.myRating?.selectedVibeTags.map(\.rawValue).joined(separator: ",") ?? ""
+            return "\(place.id):\(place.vibeCount):\(topVibes):\(selectedVibes)"
+        }
+        .joined(separator: "|")
+    }
+
+    private static func mapCellSignature(_ clusters: [MapCellCluster]) -> String {
+        clusters.map { cluster in
+            "\(cluster.id):\(cluster.count):\(cluster.totalVibes):\(cluster.displayVibe?.rawValue ?? ""):\(cluster.topVibePercent ?? 0)"
+        }
+        .joined(separator: "|")
     }
 
     private func cacheNearbyPlaces(_ places: [VibePlace], for key: String) {
@@ -582,6 +688,7 @@ final class VibeMapViewModel: ObservableObject {
     private func upsertNearbyPlace(_ place: VibePlace) {
         guard place.hasRatings else {
             nearbyPlaces.removeAll { $0.id == place.id }
+            displayedNearbySignature = Self.nearbySignature(nearbyPlaces)
             removeCachedPlace(id: place.id)
             return
         }
@@ -591,6 +698,7 @@ final class VibeMapViewModel: ObservableObject {
         } else {
             nearbyPlaces.insert(place, at: 0)
         }
+        displayedNearbySignature = Self.nearbySignature(nearbyPlaces)
         updateCachedPlace(place, replacing: place.id)
         if let currentNearbyCacheKey {
             cacheNearbyPlaces(nearbyPlaces, for: currentNearbyCacheKey)
@@ -688,6 +796,7 @@ final class VibeMapViewModel: ObservableObject {
 
         if let index = nearbyPlaces.firstIndex(where: { $0.id == placeID }) {
             nearbyPlaces[index] = place
+            displayedNearbySignature = Self.nearbySignature(nearbyPlaces)
         }
         updateCachedPlace(place, replacing: placeID)
     }
