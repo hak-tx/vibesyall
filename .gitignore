@@ -1,0 +1,17 @@
+.DS_Store
+DerivedData/
+.xcode-home/
+.wrangler/
+*.xcuserdata/
+*.xcuserdatad/
+xcuserdata/
+*.xcuserstate
+build/
+fastlane/.env
+fastlane/.env.local
+fastlane/.env.testflight
+fastlane/AuthKey_*.p8
+fastlane/report.xml
+backend/node_modules/
+backend/.wrangler/
+backend/.dev.vars

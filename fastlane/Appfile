@@ -1,0 +1,5 @@
+app_identifier("com.brianhakel.vibemap")
+
+apple_id(ENV["APPSTORE_CONNECT_USERNAME"]) if ENV["APPSTORE_CONNECT_USERNAME"]
+team_id(ENV["DEVELOPMENT_TEAM"] || ENV["FASTLANE_TEAM_ID"] || "9S372WGPR4")
+itc_team_id(ENV["APP_STORE_CONNECT_TEAM_ID"]) if ENV["APP_STORE_CONNECT_TEAM_ID"]

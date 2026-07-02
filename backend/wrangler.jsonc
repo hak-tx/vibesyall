@@ -1,0 +1,32 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "vibe-map-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-06-23",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 0.1
+	},
+	"placement": {
+		"mode": "smart"
+	},
+	"workers_dev": true,
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "vibe-map",
+			"database_id": "bc6e2572-c04d-4178-9f46-4998b9b1ddc3"
+		}
+	],
+	"vars": {
+		"ENVIRONMENT": "production",
+		"APP_BASE_URL": "https://vibe-map-api.rainvis-hak.workers.dev",
+		"APP_STORE_URL": "https://apps.apple.com/",
+		"IOS_DEEP_LINK_SCHEME": "vibesyall",
+		"ACCOUNT_EMAIL_FROM": "vibesyall@gmail.com",
+		"ACCOUNT_SIGNUP_THRESHOLD": "10"
+	}
+}

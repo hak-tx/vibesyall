@@ -1,0 +1,43 @@
+name: VibeMap
+options:
+  bundleIdPrefix: com.brianhakel
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+targets:
+  VibeMap:
+    type: application
+    platform: iOS
+    sources:
+      - VibeMap
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.brianhakel.vibemap
+        DEVELOPMENT_TEAM: 9S372WGPR4
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_FILE: VibeMap/Resources/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 22
+        TARGETED_DEVICE_FAMILY: "1"
+        VIBE_MAP_BACKEND_BASE_URL: "https://vibe-map-api.rainvis-hak.workers.dev"
+
+schemes:
+  VibeMap:
+    build:
+      targets:
+        VibeMap: all
+    run:
+      config: Debug
+  VibeMap Demo:
+    build:
+      targets:
+        VibeMap: all
+    run:
+      config: Debug
+      commandLineArguments:
+        "--demo": true

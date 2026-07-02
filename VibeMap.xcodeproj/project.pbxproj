@@ -1,0 +1,453 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		088165A467CE336C7431BA8B /* LoadState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5161142FE81D8B2CD711F1E /* LoadState.swift */; };
+		09EFF3015E0B882505786582 /* MapTapChoicesPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6BA8C836D7CD95F543F1DB3 /* MapTapChoicesPanel.swift */; };
+		1A6E0D04AE51CF406CC592EC /* ResilientVibeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F0FBED3FFD239693ECBE29A /* ResilientVibeService.swift */; };
+		1C53570B0629BC991D2B29DF /* NearbyVibesPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7890CEE9A078C52AD3264F /* NearbyVibesPanel.swift */; };
+		213F2FB9DE5A6902DD39BE9C /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD16D64081902C06398C125D /* AppConfig.swift */; };
+		2C1BE36D114D519AC0FDE2E7 /* VibeMapViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8159E2E5DD3FCBE67CD07868 /* VibeMapViewModel.swift */; };
+		346E2CCACAE9843A6D3B0509 /* RatingSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D17647ECB70914A7B4BAD60 /* RatingSheetView.swift */; };
+		3D8649B06FFF9841FA7C449B /* SearchOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 763C9728BCE45CE6C42FB48C /* SearchOverlayView.swift */; };
+		3EA65B2D75E8C66F395CFD6F /* DemoScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8850486212686ADE91040CE4 /* DemoScenario.swift */; };
+		507BC1CF7AD340E0D75C27C8 /* MockVibeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C45C6BB0F6886EB67996BD00 /* MockVibeService.swift */; };
+		507FB72306FFB211DE71A858 /* DeviceIdentityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBEB6DD2DA871305DEC3B55D /* DeviceIdentityService.swift */; };
+		5D326235D5FF087640A4998B /* VibeMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76B6A8DD13019DA2A0FBD45D /* VibeMapView.swift */; };
+		636D1CB154B1C00E7E363FB9 /* PlaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E21C7BF5D994D6897F6E26C8 /* PlaceModels.swift */; };
+		71B4AF00077A0E62B3B3BDE7 /* VibeMapApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 038BD02835EB43E4DC4AEFB3 /* VibeMapApp.swift */; };
+		7CCB042E89E6E830D0FAD349 /* SelectedPlacePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72FFFF2DBBCB802991608D52 /* SelectedPlacePanel.swift */; };
+		8B5E79C97CC8EEE00E2F58A9 /* VibeTag.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A9CE9777CD523F7A4CFA3E /* VibeTag.swift */; };
+		A53BF10654391354B7E1BCB6 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEAD423C1103D21904F30641 /* SharedComponents.swift */; };
+		B40340DEBB999B7FF83F8EF2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 461BDB8025547DA3DED5CE21 /* Assets.xcassets */; };
+		BE71093248D6B77C91D4FEB3 /* LocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 970D48E0E72CEFD121F8A2C7 /* LocationService.swift */; };
+		CBC5B448101A9E306C661442 /* AccountModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4CCBAB50B4CFF73D1BACB76 /* AccountModels.swift */; };
+		D1F7CED00DD4FC86521700DB /* AccountSignupSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1996AD29DCEEBF105EC7FE02 /* AccountSignupSheet.swift */; };
+		E462E69FB8CF4F429F35992F /* PlaceSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AE186F750E35A8C3D4C9597 /* PlaceSearchService.swift */; };
+		F9F09CBDC52C581F1EDCD3A3 /* VibeAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFFFB816AFACC14386D91453 /* VibeAPIClient.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		038BD02835EB43E4DC4AEFB3 /* VibeMapApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VibeMapApp.swift; sourceTree = "<group>"; };
+		0AE186F750E35A8C3D4C9597 /* PlaceSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceSearchService.swift; sourceTree = "<group>"; };
+		132E488E848754EB2C59D878 /* VibeMap.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VibeMap.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1996AD29DCEEBF105EC7FE02 /* AccountSignupSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSignupSheet.swift; sourceTree = "<group>"; };
+		3D17647ECB70914A7B4BAD60 /* RatingSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RatingSheetView.swift; sourceTree = "<group>"; };
+		461BDB8025547DA3DED5CE21 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		72FFFF2DBBCB802991608D52 /* SelectedPlacePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectedPlacePanel.swift; sourceTree = "<group>"; };
+		763C9728BCE45CE6C42FB48C /* SearchOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchOverlayView.swift; sourceTree = "<group>"; };
+		76B6A8DD13019DA2A0FBD45D /* VibeMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VibeMapView.swift; sourceTree = "<group>"; };
+		8159E2E5DD3FCBE67CD07868 /* VibeMapViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VibeMapViewModel.swift; sourceTree = "<group>"; };
+		8850486212686ADE91040CE4 /* DemoScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoScenario.swift; sourceTree = "<group>"; };
+		970D48E0E72CEFD121F8A2C7 /* LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationService.swift; sourceTree = "<group>"; };
+		9F0FBED3FFD239693ECBE29A /* ResilientVibeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResilientVibeService.swift; sourceTree = "<group>"; };
+		AD16D64081902C06398C125D /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
+		AEAD423C1103D21904F30641 /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
+		C45C6BB0F6886EB67996BD00 /* MockVibeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockVibeService.swift; sourceTree = "<group>"; };
+		C4CCBAB50B4CFF73D1BACB76 /* AccountModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountModels.swift; sourceTree = "<group>"; };
+		C5161142FE81D8B2CD711F1E /* LoadState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadState.swift; sourceTree = "<group>"; };
+		C7C24F33B43FD7B72A8D6CB6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		E21C7BF5D994D6897F6E26C8 /* PlaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceModels.swift; sourceTree = "<group>"; };
+		EFFFB816AFACC14386D91453 /* VibeAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VibeAPIClient.swift; sourceTree = "<group>"; };
+		F4A9CE9777CD523F7A4CFA3E /* VibeTag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VibeTag.swift; sourceTree = "<group>"; };
+		F6BA8C836D7CD95F543F1DB3 /* MapTapChoicesPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapTapChoicesPanel.swift; sourceTree = "<group>"; };
+		FA7890CEE9A078C52AD3264F /* NearbyVibesPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyVibesPanel.swift; sourceTree = "<group>"; };
+		FBEB6DD2DA871305DEC3B55D /* DeviceIdentityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentityService.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		0733A01DFF37F5A816B34252 /* Demo */ = {
+			isa = PBXGroup;
+			children = (
+				8850486212686ADE91040CE4 /* DemoScenario.swift */,
+			);
+			path = Demo;
+			sourceTree = "<group>";
+		};
+		1D03191F90C152A26D917FE3 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				FBEB6DD2DA871305DEC3B55D /* DeviceIdentityService.swift */,
+				970D48E0E72CEFD121F8A2C7 /* LocationService.swift */,
+				C45C6BB0F6886EB67996BD00 /* MockVibeService.swift */,
+				0AE186F750E35A8C3D4C9597 /* PlaceSearchService.swift */,
+				9F0FBED3FFD239693ECBE29A /* ResilientVibeService.swift */,
+				EFFFB816AFACC14386D91453 /* VibeAPIClient.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		4A252EAF6D6660F8D9712F45 /* VibeMap */ = {
+			isa = PBXGroup;
+			children = (
+				D7E9A08BADF46A34A2738D91 /* App */,
+				0733A01DFF37F5A816B34252 /* Demo */,
+				522195B900906EA293FD8ECB /* Models */,
+				F5DEF0BA0C4B1120C58305B3 /* Resources */,
+				1D03191F90C152A26D917FE3 /* Services */,
+				9D8A8ACCD0D368FA72825CF7 /* ViewModels */,
+				8641EFE422AD5F6231D8C8CF /* Views */,
+			);
+			path = VibeMap;
+			sourceTree = "<group>";
+		};
+		522195B900906EA293FD8ECB /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				C4CCBAB50B4CFF73D1BACB76 /* AccountModels.swift */,
+				C5161142FE81D8B2CD711F1E /* LoadState.swift */,
+				E21C7BF5D994D6897F6E26C8 /* PlaceModels.swift */,
+				F4A9CE9777CD523F7A4CFA3E /* VibeTag.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		8641EFE422AD5F6231D8C8CF /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				1996AD29DCEEBF105EC7FE02 /* AccountSignupSheet.swift */,
+				F6BA8C836D7CD95F543F1DB3 /* MapTapChoicesPanel.swift */,
+				FA7890CEE9A078C52AD3264F /* NearbyVibesPanel.swift */,
+				3D17647ECB70914A7B4BAD60 /* RatingSheetView.swift */,
+				763C9728BCE45CE6C42FB48C /* SearchOverlayView.swift */,
+				72FFFF2DBBCB802991608D52 /* SelectedPlacePanel.swift */,
+				AEAD423C1103D21904F30641 /* SharedComponents.swift */,
+				76B6A8DD13019DA2A0FBD45D /* VibeMapView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		9D8A8ACCD0D368FA72825CF7 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				8159E2E5DD3FCBE67CD07868 /* VibeMapViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		B0625985CBC7EC386FE56DB4 = {
+			isa = PBXGroup;
+			children = (
+				4A252EAF6D6660F8D9712F45 /* VibeMap */,
+				C4D7926CC37E4316DCD10D65 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C4D7926CC37E4316DCD10D65 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				132E488E848754EB2C59D878 /* VibeMap.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D7E9A08BADF46A34A2738D91 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				AD16D64081902C06398C125D /* AppConfig.swift */,
+				038BD02835EB43E4DC4AEFB3 /* VibeMapApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		F5DEF0BA0C4B1120C58305B3 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				461BDB8025547DA3DED5CE21 /* Assets.xcassets */,
+				C7C24F33B43FD7B72A8D6CB6 /* Info.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		E3A845187C2FED0CE54A1BB6 /* VibeMap */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8C2E1AF19CAF4FE095CAA562 /* Build configuration list for PBXNativeTarget "VibeMap" */;
+			buildPhases = (
+				41F5B4ABE3567AD6944C27E7 /* Sources */,
+				704052B81CFF6E2E0BC7D10B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = VibeMap;
+			packageProductDependencies = (
+			);
+			productName = VibeMap;
+			productReference = 132E488E848754EB2C59D878 /* VibeMap.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		70C8E2F2D969E019B7010F3C /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					E3A845187C2FED0CE54A1BB6 = {
+						DevelopmentTeam = 9S372WGPR4;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = AA1FE8FB0FC7AD4299EAD5A7 /* Build configuration list for PBXProject "VibeMap" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = B0625985CBC7EC386FE56DB4;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = C4D7926CC37E4316DCD10D65 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				E3A845187C2FED0CE54A1BB6 /* VibeMap */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		704052B81CFF6E2E0BC7D10B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B40340DEBB999B7FF83F8EF2 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		41F5B4ABE3567AD6944C27E7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CBC5B448101A9E306C661442 /* AccountModels.swift in Sources */,
+				D1F7CED00DD4FC86521700DB /* AccountSignupSheet.swift in Sources */,
+				213F2FB9DE5A6902DD39BE9C /* AppConfig.swift in Sources */,
+				3EA65B2D75E8C66F395CFD6F /* DemoScenario.swift in Sources */,
+				507FB72306FFB211DE71A858 /* DeviceIdentityService.swift in Sources */,
+				088165A467CE336C7431BA8B /* LoadState.swift in Sources */,
+				BE71093248D6B77C91D4FEB3 /* LocationService.swift in Sources */,
+				09EFF3015E0B882505786582 /* MapTapChoicesPanel.swift in Sources */,
+				507BC1CF7AD340E0D75C27C8 /* MockVibeService.swift in Sources */,
+				1C53570B0629BC991D2B29DF /* NearbyVibesPanel.swift in Sources */,
+				636D1CB154B1C00E7E363FB9 /* PlaceModels.swift in Sources */,
+				E462E69FB8CF4F429F35992F /* PlaceSearchService.swift in Sources */,
+				346E2CCACAE9843A6D3B0509 /* RatingSheetView.swift in Sources */,
+				1A6E0D04AE51CF406CC592EC /* ResilientVibeService.swift in Sources */,
+				3D8649B06FFF9841FA7C449B /* SearchOverlayView.swift in Sources */,
+				7CCB042E89E6E830D0FAD349 /* SelectedPlacePanel.swift in Sources */,
+				A53BF10654391354B7E1BCB6 /* SharedComponents.swift in Sources */,
+				F9F09CBDC52C581F1EDCD3A3 /* VibeAPIClient.swift in Sources */,
+				71B4AF00077A0E62B3B3BDE7 /* VibeMapApp.swift in Sources */,
+				5D326235D5FF087640A4998B /* VibeMapView.swift in Sources */,
+				2C1BE36D114D519AC0FDE2E7 /* VibeMapViewModel.swift in Sources */,
+				8B5E79C97CC8EEE00E2F58A9 /* VibeTag.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0F9B56C7D288F0C7F1EAF365 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		47BBF1A6E0841E89995790FA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		569CEE78ECC013B4E120F165 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 22;
+				DEVELOPMENT_TEAM = 9S372WGPR4;
+				INFOPLIST_FILE = VibeMap/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brianhakel.vibemap;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+				VIBE_MAP_BACKEND_BASE_URL = "https://vibe-map-api.rainvis-hak.workers.dev";
+			};
+			name = Release;
+		};
+		5EA3FC6EE5CA79FAB843A35E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 22;
+				DEVELOPMENT_TEAM = 9S372WGPR4;
+				INFOPLIST_FILE = VibeMap/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brianhakel.vibemap;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+				VIBE_MAP_BACKEND_BASE_URL = "https://vibe-map-api.rainvis-hak.workers.dev";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		8C2E1AF19CAF4FE095CAA562 /* Build configuration list for PBXNativeTarget "VibeMap" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5EA3FC6EE5CA79FAB843A35E /* Debug */,
+				569CEE78ECC013B4E120F165 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		AA1FE8FB0FC7AD4299EAD5A7 /* Build configuration list for PBXProject "VibeMap" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0F9B56C7D288F0C7F1EAF365 /* Debug */,
+				47BBF1A6E0841E89995790FA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 70C8E2F2D969E019B7010F3C /* Project object */;
+}

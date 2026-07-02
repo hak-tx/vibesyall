@@ -1,0 +1,26 @@
+{
+  "name": "vibe-map-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "check": "npm run typecheck && wrangler deploy --dry-run",
+    "deploy": "wrangler deploy",
+    "deploy:dry-run": "wrangler deploy --dry-run",
+    "deploy:production": "node ./scripts/deploy-production.mjs",
+    "domains:check": "node ./scripts/check-domain-cutover.mjs",
+    "ios:set-backend-url": "node ./scripts/set-ios-backend-url.mjs",
+    "cf-typegen": "wrangler types worker-configuration.d.ts",
+    "db:create:production": "wrangler d1 create vibe-map --location wnam",
+    "db:migrate:local": "wrangler d1 execute vibe-map --local --file=./schema.sql",
+    "db:migrate:remote": "wrangler d1 execute vibe-map --remote --file=./schema.sql",
+    "db:migrate:production": "wrangler d1 execute vibe-map --remote --file=./schema.sql",
+    "db:seed:local": "wrangler d1 execute vibe-map --local --file=./seed.sql",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.20.0"
+  }
+}

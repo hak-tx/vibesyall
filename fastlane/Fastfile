@@ -1,0 +1,35 @@
+require "shellwords"
+
+default_platform(:ios)
+
+REPO_ROOT = File.expand_path("..", __dir__)
+APP_IDENTIFIER = "com.brianhakel.vibemap"
+PRODUCTION_BACKEND_URL = "https://vibe-map-api.rainvis-hak.workers.dev"
+
+def repo_path(*parts)
+  File.join(REPO_ROOT, *parts)
+end
+
+def assert_release_settings!
+  pbxproj = File.read(repo_path("VibeMap.xcodeproj", "project.pbxproj"))
+  info_plist = File.read(repo_path("VibeMap", "Resources", "Info.plist"))
+
+  UI.user_error!("Release backend URL must be #{PRODUCTION_BACKEND_URL}.") unless pbxproj.include?(PRODUCTION_BACKEND_URL)
+  UI.user_error!("Bundle identifier must be #{APP_IDENTIFIER}.") unless pbxproj.include?("PRODUCT_BUNDLE_IDENTIFIER = #{APP_IDENTIFIER};")
+  UI.user_error!("Info.plist must declare CFBundlePackageType as APPL.") unless info_plist.include?("<key>CFBundlePackageType</key>") && info_plist.include?("<string>APPL</string>")
+  UI.user_error!("Info.plist must set ITSAppUsesNonExemptEncryption to false.") unless info_plist.include?("<key>ITSAppUsesNonExemptEncryption</key>") && info_plist.include?("<false/>")
+end
+
+platform :ios do
+  desc "Validate TestFlight release settings and auth without uploading"
+  lane :doctor do
+    assert_release_settings!
+    UI.success("VibeMap TestFlight release settings are valid.")
+  end
+
+  desc "Build and upload VibeMap to TestFlight"
+  lane :beta do
+    assert_release_settings!
+    sh("cd #{Shellwords.escape(REPO_ROOT)} && ./scripts/push-testflight.sh")
+  end
+end
