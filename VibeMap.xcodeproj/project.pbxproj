@@ -24,6 +24,7 @@
 		7CCB042E89E6E830D0FAD349 /* SelectedPlacePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72FFFF2DBBCB802991608D52 /* SelectedPlacePanel.swift */; };
 		8B5E79C97CC8EEE00E2F58A9 /* VibeTag.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A9CE9777CD523F7A4CFA3E /* VibeTag.swift */; };
 		A53BF10654391354B7E1BCB6 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEAD423C1103D21904F30641 /* SharedComponents.swift */; };
+		A5536663F7AA0CA8AA4B69DA /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D5FBD5FB276C0CDD17BE5EB2 /* PrivacyInfo.xcprivacy */; };
 		B40340DEBB999B7FF83F8EF2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 461BDB8025547DA3DED5CE21 /* Assets.xcassets */; };
 		BE71093248D6B77C91D4FEB3 /* LocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 970D48E0E72CEFD121F8A2C7 /* LocationService.swift */; };
 		CBC5B448101A9E306C661442 /* AccountModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4CCBAB50B4CFF73D1BACB76 /* AccountModels.swift */; };
@@ -52,6 +53,7 @@
 		C4CCBAB50B4CFF73D1BACB76 /* AccountModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountModels.swift; sourceTree = "<group>"; };
 		C5161142FE81D8B2CD711F1E /* LoadState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadState.swift; sourceTree = "<group>"; };
 		C7C24F33B43FD7B72A8D6CB6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		D5FBD5FB276C0CDD17BE5EB2 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		E21C7BF5D994D6897F6E26C8 /* PlaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceModels.swift; sourceTree = "<group>"; };
 		EFFFB816AFACC14386D91453 /* VibeAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VibeAPIClient.swift; sourceTree = "<group>"; };
 		F4A9CE9777CD523F7A4CFA3E /* VibeTag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VibeTag.swift; sourceTree = "<group>"; };
@@ -160,6 +162,7 @@
 			children = (
 				461BDB8025547DA3DED5CE21 /* Assets.xcassets */,
 				C7C24F33B43FD7B72A8D6CB6 /* Info.plist */,
+				D5FBD5FB276C0CDD17BE5EB2 /* PrivacyInfo.xcprivacy */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -225,6 +228,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B40340DEBB999B7FF83F8EF2 /* Assets.xcassets in Resources */,
+				A5536663F7AA0CA8AA4B69DA /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -1,0 +1,30 @@
+VIBES Y'ALL is a map-first place discovery app. It lets people tap or search real-world places and submit one to three predefined vibe tags. The value is quick structured place sentiment without star ratings, comments, photos, public profiles, followers, messaging, or paid content.
+
+No account, login, purchase, subscription, sample file, or demo credential is required for the main app flow.
+
+Reviewer flow:
+1. Launch the app.
+2. Allow Location While Using when prompted, or deny it and use search manually.
+3. Use the search bar or tap an existing map pin / Apple Maps point of interest.
+4. Select one to three vibe tags.
+5. Tap Submit Vibes.
+6. Review the confirmation card, community vibe summary, and optional share flow.
+7. Use the What's Nearby sheet to explore other nearby places.
+
+Optional account note:
+After a device has submitted 10 places, the app may offer optional email backup so a user can preserve vibe history across devices. This is not required to access the app or test the core flow. If you need to test it, use an email address you can receive mail at.
+
+Permissions:
+The app requests Location While Using to center the map and show nearby places. Users can still search manually if location permission is denied. The app does not request camera, photo library, contacts, microphone, or tracking permission.
+
+User-generated content:
+The only submitted user content is selection from fixed predefined vibe tags. There are no written reviews, comments, photos, public profiles, private messages, or follower features in V1. Reports and support are available through https://vibesyall.com/support.
+
+External services:
+Apple MapKit/Apple Maps for maps, place search, point-of-interest details, and directions. Cloudflare Workers and Cloudflare D1 for the VIBES Y'ALL API, aggregate vibe counts, anonymous device-based duplicate prevention, and optional email confirmation. No payment processors, subscription services, AI services, or ad networks are used.
+
+Availability:
+The app is US-first for initial testing but works wherever Apple Maps place search and the VIBES Y'ALL API are available. There are no region-specific feature, content, or regulatory differences in V1.
+
+Encryption:
+The app uses standard platform HTTPS networking only and does not implement proprietary encryption. Export compliance is set accordingly.
