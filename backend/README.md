@@ -140,24 +140,23 @@ Trending can be added later as a separate clearly labeled algorithmic view.
 
 ## Cloudflare Notes
 
-`wrangler.jsonc` currently enables the temporary Worker URL at `https://vibe-map-api.rainvis-hak.workers.dev`.
-The `rainvis-hak.workers.dev` suffix is the Cloudflare account's existing Workers subdomain, not a RainVis app dependency, database, route, or repo.
+`wrangler.jsonc` keeps the Worker on branded VIBES Y'ALL URLs. The legacy `rainvis-hak.workers.dev` suffix was only the Cloudflare account's existing Workers subdomain, not a RainVis app dependency, database, route, or repo.
 Do not change RainVis Cloudflare resources while deploying VIBES Y'ALL.
 Do not rename the account-wide `workers.dev` subdomain to solve branding; use VIBES Y'ALL custom domains instead.
 
-The same Worker serves the API, landing page, support page, privacy policy, and terms. Target branded domains are:
+The same Worker serves the API, landing page, support page, privacy policy, and terms. Branded domains are:
 
 - `https://vibesyall.com` for the App Store landing page, support, privacy, and terms
 - `https://www.vibesyall.com` for the same marketing pages
 - `https://api.vibesyall.com` for iOS API traffic
 
-`vibesyall.com` should be attached after the domain exists as a Cloudflare zone in this account. The current DNS is still at GoDaddy, so the safe sequence is:
+If the domain needs to be reattached, the safe sequence is:
 
 1. Add `vibesyall.com` as a Cloudflare zone in the VIBES Y'ALL Cloudflare account.
 2. Copy the Cloudflare nameservers.
 3. In GoDaddy, replace the current `domaincontrol.com` nameservers with Cloudflare's nameservers.
 4. In Cloudflare, attach Worker custom domains or routes for `vibesyall.com`, `www.vibesyall.com`, and `api.vibesyall.com`.
-5. Set `APP_BASE_URL` to `https://api.vibesyall.com`.
+5. Set `APP_BASE_URL` to `https://vibesyall.com`.
 6. Run `npm run domains:check` from `backend/` to verify DNS and HTTP routing.
 7. Run `npm run ios:set-backend-url -- https://api.vibesyall.com`, then push a new TestFlight build.
 

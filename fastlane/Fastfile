@@ -4,7 +4,7 @@ default_platform(:ios)
 
 REPO_ROOT = File.expand_path("..", __dir__)
 APP_IDENTIFIER = "com.brianhakel.vibemap"
-PRODUCTION_BACKEND_URL = "https://vibe-map-api.rainvis-hak.workers.dev"
+PRODUCTION_BACKEND_URL = "https://api.vibesyall.com"
 
 def repo_path(*parts)
   File.join(REPO_ROOT, *parts)

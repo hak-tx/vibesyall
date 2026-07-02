@@ -14,10 +14,9 @@ Vibe Map is a silly, low-friction native iOS MVP for tagging real-world places w
 - Cloudflare Worker backend with D1 schema
 - Local seed SQL and in-app mock service for UI testing
 
-Temporary API: `https://vibe-map-api.rainvis-hak.workers.dev`
+Production API: `https://api.vibesyall.com`.
 
-Target branded API after DNS cutover: `https://api.vibesyall.com`.
-The temporary `rainvis-hak.workers.dev` hostname is only the existing Cloudflare account Workers subdomain. It is not a RainVis code, data, or routing dependency.
+The legacy `vibe-map-api.rainvis-hak.workers.dev` hostname was only the Cloudflare account Workers subdomain. It is not a RainVis code, data, or routing dependency.
 
 ## iOS Setup
 
@@ -77,7 +76,7 @@ Set the iOS backend URL from the Worker URL printed by the deploy script:
 npm run ios:set-backend-url -- https://vibe-map-api.<account>.workers.dev
 ```
 
-After `vibesyall.com` is moved from GoDaddy DNS to Cloudflare and `api.vibesyall.com` is attached to the Worker, use:
+To point iOS builds at the branded production API, use:
 
 ```bash
 npm run ios:set-backend-url -- https://api.vibesyall.com

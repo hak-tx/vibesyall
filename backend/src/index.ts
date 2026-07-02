@@ -348,24 +348,39 @@ export default {
     }
 
     try {
-      if (request.method === "GET" && path === "/") {
+      const isReadRequest = request.method === "GET" || request.method === "HEAD";
+
+      if (isReadRequest && path === "/") {
+        if (request.method === "HEAD") {
+          return headResponse(landingPage(request, env));
+        }
         return cachedGET(request, ctx, CACHE_TTL_SECONDS.marketing, () => landingPage(request, env));
       }
 
-      if (request.method === "GET" && path === "/privacy") {
+      if (isReadRequest && path === "/privacy") {
+        if (request.method === "HEAD") {
+          return headResponse(privacyPage(request, env));
+        }
         return cachedGET(request, ctx, CACHE_TTL_SECONDS.marketing, () => privacyPage(request, env));
       }
 
-      if (request.method === "GET" && path === "/terms") {
+      if (isReadRequest && path === "/terms") {
+        if (request.method === "HEAD") {
+          return headResponse(termsPage(request, env));
+        }
         return cachedGET(request, ctx, CACHE_TTL_SECONDS.marketing, () => termsPage(request, env));
       }
 
-      if (request.method === "GET" && path === "/support") {
+      if (isReadRequest && path === "/support") {
+        if (request.method === "HEAD") {
+          return headResponse(supportPage(request, env));
+        }
         return cachedGET(request, ctx, CACHE_TTL_SECONDS.marketing, () => supportPage(request, env));
       }
 
-      if (request.method === "GET" && path === "/health") {
-        return json({ ok: true, service: "vibe-map-api", data_model: "human_labeled_place_sentiment_v1" });
+      if (isReadRequest && path === "/health") {
+        const response = json({ ok: true, service: "vibe-map-api", data_model: "human_labeled_place_sentiment_v1" });
+        return request.method === "HEAD" ? headResponse(response) : response;
       }
 
       if (request.method === "GET" && path === "/vibes") {
@@ -1182,6 +1197,14 @@ function html(markup: string, init: ResponseInit = {}): Response {
     headers.set("Cache-Control", "no-store");
   }
   return new Response(markup, { ...init, headers });
+}
+
+function headResponse(response: Response): Response {
+  return new Response(null, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
 }
 
 function escapeHTML(value: string): string {

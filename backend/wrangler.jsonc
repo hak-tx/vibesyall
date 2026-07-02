@@ -23,7 +23,7 @@
 	],
 	"vars": {
 		"ENVIRONMENT": "production",
-		"APP_BASE_URL": "https://vibe-map-api.rainvis-hak.workers.dev",
+		"APP_BASE_URL": "https://vibesyall.com",
 		"APP_STORE_URL": "https://apps.apple.com/",
 		"IOS_DEEP_LINK_SCHEME": "vibesyall",
 		"ACCOUNT_EMAIL_FROM": "vibesyall@gmail.com",
