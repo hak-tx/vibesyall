@@ -79,6 +79,18 @@ final class VibeMapViewModel: ObservableObject {
         return nearbyPlaces.filter { $0.matchesAnyVibe(in: selectedVibeFilters) }
     }
 
+    var visibleNearbyPlaceCount: Int {
+        if displayedAnnotationLayer == .mapCells {
+            return visibleMapCellClusters.reduce(0) { $0 + $1.count }
+        }
+
+        return visibleNearbyPlaces.count
+    }
+
+    var isShowingMapCellClusters: Bool {
+        displayedAnnotationLayer == .mapCells
+    }
+
     var visibleMapCellClusters: [MapCellCluster] {
         guard displayedAnnotationLayer == .mapCells else {
             return []
