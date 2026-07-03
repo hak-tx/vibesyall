@@ -271,6 +271,10 @@ type AccountSignupInput = DeviceIdentityInput & {
   redirectUrl?: unknown;
 };
 
+type AccountDeletionInput = DeviceIdentityInput & {
+  email?: unknown;
+};
+
 type AccountEmailSender = {
   send(message: {
     from: string;
@@ -288,6 +292,8 @@ type RuntimeEnv = Env & {
   IOS_DEEP_LINK_SCHEME?: string;
   ACCOUNT_EMAIL_FROM?: string;
   ACCOUNT_SIGNUP_THRESHOLD?: string;
+  APP_REVIEW_EMAIL?: string;
+  APP_REVIEW_PASSWORD?: string;
   VIBE_BETA_ACCESS_TOKEN?: string;
   VIBE_BETA_GATE_MODE?: string;
   SIGNUP_EMAIL?: AccountEmailSender;
@@ -314,6 +320,10 @@ type ProfileTokenRow = {
   email: string;
   email_normalized: string;
   email_verified_at: string | null;
+};
+
+type ProfileSessionRow = ProfileRow & {
+  session_id: string;
 };
 
 type AnonymousUserAliasRow = {
@@ -378,6 +388,15 @@ export default {
         return cachedGET(request, ctx, CACHE_TTL_SECONDS.marketing, () => supportPage(request, env));
       }
 
+      if ((request.method === "GET" || request.method === "HEAD") && path === "/account/review-login") {
+        const response = appReviewLoginPage(env);
+        return request.method === "HEAD" ? headResponse(response) : response;
+      }
+
+      if (request.method === "POST" && path === "/account/review-login") {
+        return appReviewLogin(request, env);
+      }
+
       if (isReadRequest && path === "/health") {
         const response = json({ ok: true, service: "vibe-map-api", data_model: "human_labeled_place_sentiment_v1" });
         return request.method === "HEAD" ? headResponse(response) : response;
@@ -403,6 +422,10 @@ export default {
 
       if (request.method === "POST" && path === "/account/signup") {
         return requestAccountSignup(request, env);
+      }
+
+      if (request.method === "POST" && path === "/account/delete") {
+        return requestAccountDeletion(request, env);
       }
 
       if (request.method === "GET" && path === "/account/confirm") {
@@ -465,7 +488,8 @@ async function getAccountEligibility(request: Request, env: Env): Promise<Respon
   }
 
   const anonymousUserID = anonymousUserIDForDeviceHash(deviceIDHash);
-  return json({ account: await buildAccountEligibility(env, deviceIDHash, anonymousUserID) });
+  const sessionProfile = await fetchProfileForSession(request, env);
+  return json({ account: await buildAccountEligibility(env, deviceIDHash, anonymousUserID, sessionProfile) });
 }
 
 async function requestAccountSignup(request: Request, env: Env): Promise<Response> {
@@ -532,6 +556,48 @@ async function requestAccountSignup(request: Request, env: Env): Promise<Respons
   );
 }
 
+async function requestAccountDeletion(request: Request, env: Env): Promise<Response> {
+  const body = await readJson<AccountDeletionInput>(request);
+  if (!body.ok) {
+    return json({ error: body.error }, { status: 400 });
+  }
+
+  const email = normalizeEmail(body.value.email);
+  if (!email) {
+    return json({ error: "A valid email address is required." }, { status: 400 });
+  }
+
+  const deviceIDHash = await deviceHashFromBody(body.value);
+  if (!deviceIDHash) {
+    return json({ error: "device_id_hash is required." }, { status: 400 });
+  }
+
+  const profile = await env.DB.prepare(
+    `SELECT p.*
+     FROM profiles p
+     JOIN profile_devices pd ON pd.profile_id = p.id
+     WHERE p.email_normalized = ? AND pd.device_id_hash = ?
+     LIMIT 1`
+  )
+    .bind(email, deviceIDHash)
+    .first<ProfileRow>();
+
+  if (profile) {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM profile_sessions WHERE profile_id = ?").bind(profile.id),
+      env.DB.prepare("DELETE FROM email_confirmation_tokens WHERE profile_id = ?").bind(profile.id),
+      env.DB.prepare("DELETE FROM profile_devices WHERE profile_id = ?").bind(profile.id),
+      env.DB.prepare("DELETE FROM profiles WHERE id = ?").bind(profile.id),
+    ]);
+  }
+
+  return json({
+    status: "deleted",
+    deleted: Boolean(profile),
+    message: "If an account matched this email and device, it has been deleted.",
+  });
+}
+
 async function confirmAccountEmail(url: URL, env: Env): Promise<Response> {
   const token = cleanString(url.searchParams.get("token"));
   if (!token) {
@@ -571,10 +637,7 @@ async function confirmAccountEmail(url: URL, env: Env): Promise<Response> {
   }
 
   const now = new Date().toISOString();
-  const rawSessionToken = await randomToken();
-  const sessionHash = await sha256Hex(`vibes-yall-profile-session:${rawSessionToken}`);
-  const sessionID = crypto.randomUUID();
-  const sessionExpiresAt = new Date(Date.now() + PROFILE_SESSION_TTL_MS).toISOString();
+  const rawSessionToken = await createProfileSession(env, row.profile_id, now);
 
   await env.DB.batch([
     env.DB.prepare("UPDATE email_confirmation_tokens SET consumed_at = ? WHERE id = ?").bind(now, row.id),
@@ -585,21 +648,52 @@ async function confirmAccountEmail(url: URL, env: Env): Promise<Response> {
            last_seen_at = ?
        WHERE id = ?`
     ).bind(now, now, now, row.profile_id),
-    env.DB.prepare(
-      `INSERT INTO profile_sessions (id, profile_id, token_hash, created_at, expires_at, last_seen_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).bind(sessionID, row.profile_id, sessionHash, now, sessionExpiresAt, now),
   ]);
 
   const appURL = deepLinkURLForAccount(env, rawSessionToken, row.redirect_url);
   return accountResultPage("Your account is confirmed.", true, env, appURL);
 }
 
-async function buildAccountEligibility(env: Env, deviceIDHash: string, anonymousUserID: string) {
+async function appReviewLogin(request: Request, env: Env): Promise<Response> {
+  const configuredEmail = normalizeEmail((env as RuntimeEnv).APP_REVIEW_EMAIL);
+  const configuredPassword = cleanString((env as RuntimeEnv).APP_REVIEW_PASSWORD);
+  if (!configuredEmail || !configuredPassword) {
+    return json({ error: "App Review login is not configured." }, { status: 404 });
+  }
+
+  const form = await request.formData();
+  const email = normalizeEmail(form.get("email"));
+  const password = cleanString(form.get("password"));
+  if (!timingSafeStringEqual(email, configuredEmail) || !timingSafeStringEqual(password, configuredPassword)) {
+    return appReviewLoginPage(env, "The App Review username or password was not accepted.", 401);
+  }
+
+  const now = new Date().toISOString();
+  const deviceIDHash = await sha256Hex(`vibes-yall-device:app-review:${configuredEmail}`);
+  const anonymousUserID = anonymousUserIDForDeviceHash(deviceIDHash);
+  await upsertAnonymousUser(env, anonymousUserID, deviceIDHash, now);
+
+  const profile = await upsertProfileForEmailAndDevice(env, configuredEmail, deviceIDHash, anonymousUserID, now);
+  await env.DB.prepare(
+    `UPDATE profiles
+     SET email_verified_at = COALESCE(email_verified_at, ?),
+         updated_at = ?,
+         last_seen_at = ?
+     WHERE id = ?`
+  )
+    .bind(now, now, now, profile.id)
+    .run();
+
+  const rawSessionToken = await createProfileSession(env, profile.id, now);
+  const appURL = deepLinkURLForAccount(env, rawSessionToken, null);
+  return accountResultPage("App Review account ready.", true, env, appURL);
+}
+
+async function buildAccountEligibility(env: Env, deviceIDHash: string, anonymousUserID: string, sessionProfile?: ProfileRow | null) {
   const threshold = accountSignupThreshold(env);
   const anonymousUserIDs = await anonymousUserIDsForPrimary(env, anonymousUserID);
   const vibedPlaceCount = await countVibedPlacesForAnonymousUsers(env, anonymousUserIDs);
-  const profile = await fetchProfileForDeviceHash(env, deviceIDHash);
+  const profile = sessionProfile ?? (await fetchProfileForDeviceHash(env, deviceIDHash));
 
   return {
     eligible: vibedPlaceCount >= threshold,
@@ -644,6 +738,61 @@ async function fetchProfileForDeviceHash(env: Env, deviceIDHash: string): Promis
   )
     .bind(deviceIDHash)
     .first<ProfileRow>();
+}
+
+async function fetchProfileForSession(request: Request, env: Env): Promise<ProfileRow | null> {
+  const authorization = cleanString(request.headers.get("Authorization"));
+  if (!authorization?.toLowerCase().startsWith("bearer ")) {
+    return null;
+  }
+
+  const sessionToken = cleanString(authorization.slice("bearer ".length));
+  if (!sessionToken) {
+    return null;
+  }
+
+  const tokenHash = await sha256Hex(`vibes-yall-profile-session:${sessionToken}`);
+  const now = new Date().toISOString();
+  const profile = await env.DB.prepare(
+    `SELECT
+       p.*,
+       ps.id AS session_id
+     FROM profile_sessions ps
+     JOIN profiles p ON p.id = ps.profile_id
+     WHERE ps.token_hash = ?
+       AND ps.revoked_at IS NULL
+       AND ps.expires_at > ?
+     LIMIT 1`
+  )
+    .bind(tokenHash, now)
+    .first<ProfileSessionRow>();
+
+  if (!profile) {
+    return null;
+  }
+
+  await env.DB.batch([
+    env.DB.prepare("UPDATE profile_sessions SET last_seen_at = ? WHERE id = ?").bind(now, profile.session_id),
+    env.DB.prepare("UPDATE profiles SET last_seen_at = ?, updated_at = ? WHERE id = ?").bind(now, now, profile.id),
+  ]);
+
+  return profile;
+}
+
+async function createProfileSession(env: Env, profileID: string, now: string): Promise<string> {
+  const rawSessionToken = await randomToken();
+  const sessionHash = await sha256Hex(`vibes-yall-profile-session:${rawSessionToken}`);
+  const sessionID = crypto.randomUUID();
+  const sessionExpiresAt = new Date(Date.now() + PROFILE_SESSION_TTL_MS).toISOString();
+
+  await env.DB.prepare(
+    `INSERT INTO profile_sessions (id, profile_id, token_hash, created_at, expires_at, last_seen_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  )
+    .bind(sessionID, profileID, sessionHash, now, sessionExpiresAt, now)
+    .run();
+
+  return rawSessionToken;
 }
 
 async function upsertProfileForEmailAndDevice(
@@ -841,6 +990,7 @@ function privacyPage(_request: Request, _env: Env): Response {
       "You can use the app anonymously. Anonymous activity is tied to a hashed device identifier so one device can update its own vibe for a place without creating duplicate votes.",
       "If you choose to create an account after contributing enough places, we collect your email address to confirm the account and let you keep your vibe history if you switch devices.",
       "Public app responses show aggregate place vibe data. Raw vibe events, anonymous user ids, device hashes, and email addresses are not public.",
+      "Optional accounts can be deleted from the in-app menu, or by contacting support if you need help.",
       `Contact: ${SUPPORT_EMAIL}`,
     ],
     "Last updated June 30, 2026"
@@ -876,7 +1026,7 @@ function supportPage(_request: Request, _env: Env): Response {
     <a class="back" href="/">VIBES Y'ALL</a>
     <h1>Support</h1>
     <p class="updated">Need help with VIBES Y'ALL?</p>
-    <p>Email us for app support, account help, place corrections, privacy questions, or TestFlight feedback.</p>
+    <p>Email us for app support, account help, account deletion, place corrections, privacy questions, or TestFlight feedback.</p>
     <div class="actions">
       <a class="button primary" href="mailto:${escapeHTML(email)}">${escapeHTML(email)}</a>
     </div>
@@ -928,6 +1078,79 @@ function accountResultPage(message: string, success: boolean, env: Env, appURL?:
   </main>
 </body>
 </html>`);
+}
+
+function appReviewLoginPage(env: Env, error?: string, status = 200): Response {
+  const configuredEmail = normalizeEmail((env as RuntimeEnv).APP_REVIEW_EMAIL);
+  return html(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>App Review Login | VIBES Y'ALL</title>
+  <style>${landingCSS()}
+    .review-form {
+      display: grid;
+      gap: 1rem;
+      margin-top: 1.5rem;
+      text-align: left;
+    }
+    .review-form label {
+      display: grid;
+      gap: 0.45rem;
+      color: var(--muted);
+      font-size: 0.95rem;
+      font-weight: 800;
+    }
+    .review-form input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      background: rgba(255, 255, 255, 0.76);
+      color: var(--ink);
+      font: inherit;
+      font-size: 1rem;
+      padding: 0.95rem 1rem;
+      outline: none;
+    }
+    .review-form input:focus {
+      border-color: var(--navy);
+      box-shadow: 0 0 0 0.2rem rgba(16, 44, 107, 0.12);
+    }
+    .review-error {
+      border-radius: 1rem;
+      background: rgba(231, 76, 60, 0.1);
+      color: #9f2f27;
+      font-weight: 800;
+      padding: 0.85rem 1rem;
+    }
+    .review-note {
+      color: var(--muted);
+      font-size: 0.98rem;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <main class="document center">
+    <div class="brand small">VIBES<br>Y'ALL</div>
+    <h1>App Review Login</h1>
+    <p class="review-note">Use the reviewer credentials from App Store Connect to create a verified test account, then open the app from this device.</p>
+    ${error ? `<div class="review-error">${escapeHTML(error)}</div>` : ""}
+    <form class="review-form" method="post" action="/account/review-login">
+      <label>
+        Email
+        <input name="email" type="email" autocomplete="username" value="${escapeHTML(configuredEmail ?? "")}" required>
+      </label>
+      <label>
+        Password
+        <input name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <button class="button primary" type="submit">Create review session</button>
+    </form>
+  </main>
+</body>
+</html>`, { status });
 }
 
 function landingCSS(): string {
@@ -2355,7 +2578,7 @@ async function deviceHashFromRequest(request: Request): Promise<string | null> {
   return normalizeDeviceHash(headerValue);
 }
 
-async function deviceHashFromBody(input: VibeInput | ReportInput): Promise<string | null> {
+async function deviceHashFromBody(input: DeviceIdentityInput): Promise<string | null> {
   const raw =
     cleanString(input.device_id_hash ?? input.deviceIdHash) ??
     cleanString(input.device_id ?? input.deviceId);
@@ -2684,6 +2907,7 @@ function requiresBetaAccess(path: string): boolean {
     path === "/privacy" ||
     path === "/terms" ||
     path === "/support" ||
+    path === "/account/review-login" ||
     path === "/account/confirm"
   ) {
     return false;
@@ -2721,7 +2945,7 @@ function corsHeaders(): Headers {
   headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   headers.set(
     "Access-Control-Allow-Headers",
-    `Content-Type, X-Vibe-Device-ID-Hash, X-Vibe-App-Version, X-Vibe-Source, ${BETA_ACCESS_HEADER}`
+    `Content-Type, Authorization, X-Vibe-Device-ID-Hash, X-Vibe-App-Version, X-Vibe-Source, ${BETA_ACCESS_HEADER}`
   );
   headers.set("X-RateLimit-Policy", "placeholder");
   return headers;

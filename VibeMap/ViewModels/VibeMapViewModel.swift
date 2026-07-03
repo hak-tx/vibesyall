@@ -131,7 +131,6 @@ final class VibeMapViewModel: ObservableObject {
         locationService.requestAuthorizationAndLocation()
         await loadAllowedVibes()
         await loadNearby(center: visibleCenter)
-        await maybeOfferAccountSignup()
     }
 
     func updateVisibleCenter(_ coordinate: CLLocationCoordinate2D) {
@@ -478,11 +477,55 @@ final class VibeMapViewModel: ObservableObject {
         accountSignupPrompt = nil
     }
 
+    var hasConfirmedAccount: Bool {
+        UserDefaults.standard.string(forKey: accountSessionTokenKey) != nil
+    }
+
     func requestAccountSignup(email: String) async throws -> AccountSignupResponse {
         let response = try await vibeService.requestAccountSignup(
             email: email,
             deviceIdHash: identityService.deviceIDHash()
         )
+        return response
+    }
+
+    func presentAccountSignupFromMenu() async {
+        guard accountSignupPrompt == nil else { return }
+
+        do {
+            let eligibility = try await vibeService.fetchAccountEligibility(deviceIdHash: identityService.deviceIDHash())
+            if eligibility.profile?.emailVerified == true || hasConfirmedAccount {
+                alert = AppAlert(
+                    title: "Account saved",
+                    message: "Your confirmed account is active on this device."
+                )
+                return
+            }
+
+            guard eligibility.eligible else {
+                alert = AppAlert(
+                    title: "Keep vibing",
+                    message: "Account backup unlocks after \(eligibility.threshold) vibed places. You have \(eligibility.vibedPlaceCount), so \(eligibility.remainingPlaces) more to go."
+                )
+                return
+            }
+
+            UserDefaults.standard.set(false, forKey: accountPromptDismissedKey)
+            accountSignupPrompt = AccountSignupPrompt(eligibility: eligibility)
+        } catch {
+            alert = AppAlert(title: "Could not check account status", message: error.localizedDescription)
+        }
+    }
+
+    func requestAccountDeletion(email: String) async throws -> AccountDeletionResponse {
+        let response = try await vibeService.requestAccountDeletion(
+            email: email,
+            deviceIdHash: identityService.deviceIDHash()
+        )
+        UserDefaults.standard.removeObject(forKey: accountSessionTokenKey)
+        UserDefaults.standard.set(false, forKey: accountPromptDismissedKey)
+        accountSignupPrompt = nil
+        alert = AppAlert(title: "Account deleted", message: response.message)
         return response
     }
 

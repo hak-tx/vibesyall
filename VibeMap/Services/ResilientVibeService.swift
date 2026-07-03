@@ -61,6 +61,10 @@ final class ResilientVibeService: VibeServicing {
         try await primary.requestAccountSignup(email: email, deviceIdHash: deviceIdHash)
     }
 
+    func requestAccountDeletion(email: String, deviceIdHash: String) async throws -> AccountDeletionResponse {
+        try await primary.requestAccountDeletion(email: email, deviceIdHash: deviceIdHash)
+    }
+
     private func runWithConnectivityFallback<Result>(
         _ primaryCall: () async throws -> Result,
         fallback fallbackCall: () async throws -> Result

@@ -10,6 +10,8 @@ struct VibeMapView: View {
     @State private var hasCenteredOnInitialUserLocation = false
     @State private var isSearchFocused = false
     @State private var isNearbyPanelMinimized = false
+    @State private var isAppMenuPresented = false
+    @State private var isAccountDeletionPresented = false
     @AppStorage("vibes-yall.map-display-style") private var mapDisplayStyleRawValue = VibeMapDisplayStyle.standard.rawValue
     @State private var visibleRegion = MKCoordinateRegion(
         center: AppConfig.initialMapCenter,
@@ -107,7 +109,10 @@ struct VibeMapView: View {
                 }
                 .ignoresSafeArea()
 
-                SearchOverlayView(viewModel: viewModel, isSearchFocused: $isSearchFocused)
+                SearchOverlayView(viewModel: viewModel, isSearchFocused: $isSearchFocused) {
+                    isSearchFocused = false
+                    isAppMenuPresented = true
+                }
             }
 
             if !isSearchFocused {
@@ -155,6 +160,38 @@ struct VibeMapView: View {
         .sheet(item: $viewModel.accountSignupPrompt) { prompt in
             AccountSignupSheet(viewModel: viewModel, prompt: prompt)
                 .presentationDetents([.height(520)])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+                .preferredColorScheme(.light)
+                .environment(\.colorScheme, .light)
+        }
+        .sheet(isPresented: $isAppMenuPresented) {
+            AppMenuSheet(
+                hasConfirmedAccount: viewModel.hasConfirmedAccount,
+                onSignUp: {
+                    isAppMenuPresented = false
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(220))
+                        await viewModel.presentAccountSignupFromMenu()
+                    }
+                },
+                onDeleteAccount: {
+                    isAppMenuPresented = false
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(220))
+                        isAccountDeletionPresented = true
+                    }
+                }
+            )
+            .presentationDetents([.height(430)])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .preferredColorScheme(.light)
+            .environment(\.colorScheme, .light)
+        }
+        .sheet(isPresented: $isAccountDeletionPresented) {
+            AccountDeletionSheet(viewModel: viewModel)
+                .presentationDetents([.height(390)])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
                 .preferredColorScheme(.light)

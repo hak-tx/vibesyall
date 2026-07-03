@@ -9,6 +9,7 @@ protocol VibeServicing {
     func submitRating(placeId: String, deviceIdHash: String, vibeTags: [VibeTag]) async throws -> RatingSubmission
     func fetchAccountEligibility(deviceIdHash: String) async throws -> AccountEligibility
     func requestAccountSignup(email: String, deviceIdHash: String) async throws -> AccountSignupResponse
+    func requestAccountDeletion(email: String, deviceIdHash: String) async throws -> AccountDeletionResponse
 }
 
 struct VibeAPIClient: VibeServicing {
@@ -16,6 +17,7 @@ struct VibeAPIClient: VibeServicing {
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
+    private let accountSessionTokenKey = "vibes-yall.account-session-token"
 
     init(baseURL: URL, session: URLSession = .shared) {
         self.baseURL = baseURL
@@ -117,6 +119,11 @@ struct VibeAPIClient: VibeServicing {
         return try await send(path: "account/signup", method: "POST", body: request)
     }
 
+    func requestAccountDeletion(email: String, deviceIdHash: String) async throws -> AccountDeletionResponse {
+        let request = AccountDeletionRequest(email: email, deviceIdHash: deviceIdHash)
+        return try await send(path: "account/delete", method: "POST", body: request)
+    }
+
     private func get<Response: Decodable>(path: String, deviceIdHash: String? = nil) async throws -> Response {
         try await get(url: baseURL.appendingPathComponent(path), deviceIdHash: deviceIdHash)
     }
@@ -144,6 +151,11 @@ struct VibeAPIClient: VibeServicing {
 
         if let betaAccessToken = AppConfig.betaAccessToken {
             request.addValue(betaAccessToken, forHTTPHeaderField: "X-Vibe-Beta-Token")
+        }
+
+        if let accountSessionToken = UserDefaults.standard.string(forKey: accountSessionTokenKey),
+           !accountSessionToken.isEmpty {
+            request.addValue("Bearer \(accountSessionToken)", forHTTPHeaderField: "Authorization")
         }
 
         if let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,

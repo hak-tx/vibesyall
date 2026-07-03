@@ -184,6 +184,14 @@ final class MockVibeService: VibeServicing {
         )
     }
 
+    func requestAccountDeletion(email: String, deviceIdHash: String) async throws -> AccountDeletionResponse {
+        AccountDeletionResponse(
+            status: "deleted",
+            deleted: true,
+            message: "If an account matched this email and device, it has been deleted."
+        )
+    }
+
     private func topBreakdowns(
         from existingBreakdowns: [VibeBreakdown],
         adding ratings: [VibeRating],

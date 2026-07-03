@@ -40,7 +40,16 @@ Review notes:
 ```text
 VIBES Y'ALL is a map-first place discovery app. It lets people tap or search real-world places and submit one to three predefined vibe tags. The value is quick structured place sentiment without star ratings, comments, photos, public profiles, followers, messaging, or paid content.
 
-No account, login, purchase, subscription, sample file, or demo credential is required for the main app flow.
+No account, purchase, subscription, sample file, or demo credential is required for the main app flow.
+
+App Review sign-in:
+The main app is free to use anonymously. VIBES Y'ALL also includes an optional account backup flow after 10 submitted places. For App Review, a dedicated reviewer login is available so the optional account state can be tested without waiting for email delivery:
+
+Review login URL: https://vibesyall.com/account/review-login
+Username: appreview@vibesyall.com
+Password: use the password entered in the App Review Sign-in Information field.
+
+Open the review login URL in Safari on the test device, enter the credentials, then tap "Open the app" to return to VIBES Y'ALL with a verified review account session.
 
 Reviewer flow:
 1. Launch the app.
@@ -52,7 +61,7 @@ Reviewer flow:
 7. Use the What's Nearby sheet to explore other nearby places.
 
 Optional account note:
-After a device has submitted 10 places, the app may offer optional email backup so a user can preserve vibe history across devices. This is not required to access the app or test the core flow. If you need to test it, use an email address you can receive mail at.
+After a device has submitted 10 places, the app may offer optional email backup so a user can preserve vibe history across devices. This is not required to access the app or test the core flow. App Review can use the reviewer login above to test the optional account state.
 
 Permissions:
 The app requests Location While Using to center the map and show nearby places. Users can still search manually if location permission is denied. The app does not request camera, photo library, contacts, microphone, or tracking permission.
@@ -128,6 +137,15 @@ VIBES Y'ALL is a map-first place discovery app for people who want a quick way t
 4. Setup and access instructions
 No login, paid purchase, subscription, sample file, or demo credential is required for the main app.
 
+App Review sign-in:
+The main app can be reviewed without an account. VIBES Y'ALL also includes an optional account backup flow after 10 submitted places. To test the optional account state without waiting for email confirmation, use:
+
+Review login URL: https://vibesyall.com/account/review-login
+Username: appreview@vibesyall.com
+Password: use the password in App Store Connect Sign-in Information.
+
+Open that URL in Safari on the review device, enter the credentials, then tap "Open the app" to return to VIBES Y'ALL with a verified review account session.
+
 Reviewer flow:
 1. Launch VIBES Y'ALL.
 2. Allow Location While Using when prompted, or deny it and use search manually.
@@ -138,7 +156,7 @@ Reviewer flow:
 7. Use the What's Nearby sheet to explore nearby places.
 
 Optional account note:
-After a device has submitted 10 places, the app may offer optional email backup so a user can preserve vibe history across devices. This is not required to use or review the core app flow. If you need to test it, use any email address you can receive mail at.
+After a device has submitted 10 places, the app may offer optional email backup so a user can preserve vibe history across devices. This is not required to use or review the core app flow. The reviewer login above creates the same verified account session for testing.
 
 5. External services, tools, and platforms
 - Apple MapKit / Apple Maps: map display, place search, point-of-interest details, and directions.

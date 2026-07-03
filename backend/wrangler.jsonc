@@ -27,6 +27,7 @@
 		"APP_STORE_URL": "https://apps.apple.com/",
 		"IOS_DEEP_LINK_SCHEME": "vibesyall",
 		"ACCOUNT_EMAIL_FROM": "vibesyall@gmail.com",
-		"ACCOUNT_SIGNUP_THRESHOLD": "10"
+		"ACCOUNT_SIGNUP_THRESHOLD": "10",
+		"APP_REVIEW_EMAIL": "appreview@vibesyall.com"
 	}
 }

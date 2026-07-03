@@ -3,15 +3,20 @@ import SwiftUI
 struct SearchOverlayView: View {
     @ObservedObject var viewModel: VibeMapViewModel
     @Binding var isSearchFocused: Bool
+    let onMenuTap: () -> Void
     @FocusState private var isFieldFocused: Bool
 
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 8) {
                 HStack(spacing: 10) {
-                    BrandSearchLogo()
-
                     searchField
+
+                    Button(action: onMenuTap) {
+                        BrandMenuButtonLabel()
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open VIBES Y'ALL menu")
                 }
 
                 vibeFilters
@@ -225,19 +230,31 @@ struct SearchOverlayView: View {
     }
 }
 
-private struct BrandSearchLogo: View {
+private struct BrandMenuButtonLabel: View {
     var body: some View {
-        Image("BrandLogo")
-            .resizable()
-            .scaledToFill()
-            .frame(width: 48, height: 48)
-            .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .stroke(.white.opacity(0.60), lineWidth: 1)
-            }
-            .shadow(color: .black.opacity(0.12), radius: 10, y: 5)
-            .accessibilityHidden(true)
+        ZStack(alignment: .bottomTrailing) {
+            Image("BrandLogo")
+                .resizable()
+                .scaledToFill()
+                .frame(width: 48, height: 48)
+                .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .stroke(.white.opacity(0.60), lineWidth: 1)
+                }
+
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 8, weight: .black))
+                .foregroundStyle(VibeDesign.brandYellow)
+                .frame(width: 18, height: 18)
+                .background(VibeDesign.brandBlue, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(0.75), lineWidth: 1)
+                }
+                .offset(x: 3, y: 3)
+        }
+        .shadow(color: .black.opacity(0.12), radius: 10, y: 5)
     }
 }
 

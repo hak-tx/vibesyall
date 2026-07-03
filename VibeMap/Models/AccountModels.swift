@@ -41,6 +41,17 @@ struct AccountSignupResponse: Decodable {
     var message: String
 }
 
+struct AccountDeletionRequest: Encodable {
+    var email: String
+    var deviceIdHash: String
+}
+
+struct AccountDeletionResponse: Decodable {
+    var status: String
+    var deleted: Bool
+    var message: String
+}
+
 struct AccountSignupPrompt: Identifiable, Hashable {
     let id = UUID()
     var eligibility: AccountEligibility
