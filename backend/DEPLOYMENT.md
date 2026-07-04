@@ -46,6 +46,7 @@ The deploy runner:
 - creates the production D1 database if `wrangler.jsonc` still has the placeholder id
 - runs TypeScript and Wrangler dry-run checks
 - applies `schema.sql` to remote D1
+- ensures private admin analytics tables exist
 - deploys the Worker
 - prints the Worker URL
 
@@ -89,6 +90,30 @@ npm run ios:set-backend-url -- https://api.vibesyall.com
 ```
 
 Then push a new TestFlight build.
+
+## Private Admin Analytics Setup
+
+Create a Cloudflare Zero Trust Access application for:
+
+```text
+https://admin.vibesyall.com
+```
+
+Allow only Brian's Cloudflare login/email, then add `admin.vibesyall.com` as a Worker custom domain or route to this Worker.
+
+Configure Worker variables/secrets:
+
+```bash
+npx wrangler secret put ANALYTICS_SECRET
+npx wrangler secret put CF_ACCESS_AUD
+npx wrangler secret put CF_ACCESS_TEAM_DOMAIN
+```
+
+`ADMIN_EMAILS` is non-secret and currently set in `wrangler.jsonc` as `brianhakel@gmail.com`.
+`CF_ACCESS_TEAM_DOMAIN` must include the scheme, for example `https://your-team.cloudflareaccess.com`.
+`CF_ACCESS_AUD` is the Audience (AUD) tag from the Cloudflare Access application.
+
+The admin routes fail closed until those Access values are configured.
 
 ## Scale Notes
 

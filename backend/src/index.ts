@@ -1,4 +1,5 @@
 import { LANDING_ASSETS } from "./landing-assets";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 
 const DEFAULT_NEARBY_RADIUS_METERS = 5_000;
 const MIN_NEARBY_RADIUS_METERS = 100;
@@ -9,9 +10,10 @@ const MAX_MAP_CELL_QUERY_ROWS = 8_000;
 const MAX_MAP_CELL_RESPONSE_CELLS = 260;
 const MIN_MAP_CELL_SIZE_METERS = 10_000;
 const MAX_MAP_CELL_SIZE_METERS = 300_000;
-const CACHE_VERSION = "2026-07-01-vibesyall-site-2";
+const CACHE_VERSION = "2026-07-04-map-cells-2";
+const LIVE_APP_STORE_URL = "https://apps.apple.com/us/app/vibes-yall/id6783989332?mt=8";
 const CACHE_TTL_SECONDS = {
-  marketing: 3_600,
+  marketing: 60,
   vibeTaxonomy: 3_600,
   publicPlace: 30,
   nearby: 300,
@@ -86,17 +88,41 @@ const CLIENT_VIBES = [
 const REPORT_REASONS = ["wrong_place", "duplicate_place", "spam_or_brigading", "inappropriate", "other"] as const;
 const REPORT_STATUSES = ["open", "reviewed", "dismissed", "action_taken"] as const;
 const ACTIVE_EVENT_WHERE = "moderation_status = 'active' AND is_deleted = 0";
+const CURRENT_TAXONOMY_VERSION_ID = "vibes_v1";
+const PLACE_SNAPSHOT_VERSION = "place_snapshot_v1";
 const ACCOUNT_SIGNUP_THRESHOLD_DEFAULT = 10;
 const EMAIL_CONFIRMATION_TTL_MS = 24 * 60 * 60 * 1000;
 const PROFILE_SESSION_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 const VIBES_MARKETING_HOST = "vibesyall.com";
 const SUPPORT_EMAIL = "vibesyall@gmail.com";
+const ACCOUNT_CONFIRMATION_FROM_EMAIL = "hello@vibesyall.com";
 const BETA_ACCESS_HEADER = "X-Vibe-Beta-Token";
+const ADMIN_HOST = "admin.vibesyall.com";
+const ADMIN_ACCESS_JWT_HEADER = "cf-access-jwt-assertion";
+const ADMIN_ACCESS_EMAIL_HEADER = "cf-access-authenticated-user-email";
+const ANALYTICS_EVENT_NAMES = [
+  "app_open",
+  "search_performed",
+  "place_selected",
+  "rating_started",
+  "vibe_submitted",
+  "account_signup_requested",
+  "account_login_requested",
+  "account_logout",
+  "account_delete_requested",
+] as const;
+const MAX_ANALYTICS_PROPERTIES = 16;
+const MAX_ANALYTICS_PROPERTY_KEY_LENGTH = 48;
+const MAX_ANALYTICS_PROPERTY_VALUE_LENGTH = 160;
+const ADMIN_DEVICE_LABEL_IDENTITY_TYPES = ["analytics_device", "anonymous_user"] as const;
+const ADMIN_DEVICE_LABEL_CATEGORIES = ["internal", "reviewer", "external", "unknown"] as const;
 
 type VibeTagID = (typeof VIBE_TAG_DEFINITIONS)[number]["id"];
 type SentimentGroup = (typeof VIBE_TAG_DEFINITIONS)[number]["sentiment_group"];
 type ReportReason = (typeof REPORT_REASONS)[number];
 type ReportStatus = (typeof REPORT_STATUSES)[number];
+type AdminDeviceLabelIdentityType = (typeof ADMIN_DEVICE_LABEL_IDENTITY_TYPES)[number];
+type AdminDeviceLabelCategory = (typeof ADMIN_DEVICE_LABEL_CATEGORIES)[number];
 
 type VibeTagRow = {
   id: VibeTagID;
@@ -175,6 +201,9 @@ type VibeEventRow = {
   third_vibe_tag_id: VibeTagID | null;
   source: string;
   app_version: string | null;
+  taxonomy_version_id: string | null;
+  submission_context: string | null;
+  place_snapshot_json: string | null;
   created_at: string;
   updated_at: string;
   is_flagged: number;
@@ -244,6 +273,8 @@ type VibeInput = {
   source?: unknown;
   app_version?: unknown;
   appVersion?: unknown;
+  submission_context?: unknown;
+  submissionContext?: unknown;
 };
 
 type ReportInput = {
@@ -265,7 +296,40 @@ type DeviceIdentityInput = {
   deviceId?: unknown;
 };
 
+type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
+
+type AnalyticsEventInput = DeviceIdentityInput & {
+  event_name?: unknown;
+  eventName?: unknown;
+  platform?: unknown;
+  app_version?: unknown;
+  appVersion?: unknown;
+  properties?: unknown;
+};
+
+type AdminAnalyticsOptions = {
+  includeInternal: boolean;
+};
+
+type AdminDeviceLabelInput = {
+  identity_type?: unknown;
+  identityType?: unknown;
+  identity_id?: unknown;
+  identityId?: unknown;
+  label?: unknown;
+  category?: unknown;
+  excluded_from_core_metrics?: unknown;
+  excludedFromCoreMetrics?: unknown;
+  notes?: unknown;
+};
+
 type AccountSignupInput = DeviceIdentityInput & {
+  email?: unknown;
+  redirect_url?: unknown;
+  redirectUrl?: unknown;
+};
+
+type AccountRecoveryInput = {
   email?: unknown;
   redirect_url?: unknown;
   redirectUrl?: unknown;
@@ -275,16 +339,8 @@ type AccountDeletionInput = DeviceIdentityInput & {
   email?: unknown;
 };
 
-type AccountEmailSender = {
-  send(message: {
-    from: string;
-    to: string;
-    subject: string;
-    text?: string;
-    html?: string;
-    headers?: Record<string, string>;
-  }): Promise<unknown>;
-};
+type AccountEmailSender = SendEmail;
+type AccountEmailPurpose = "email_confirmation" | "login";
 
 type RuntimeEnv = Env & {
   APP_BASE_URL?: string;
@@ -292,11 +348,125 @@ type RuntimeEnv = Env & {
   IOS_DEEP_LINK_SCHEME?: string;
   ACCOUNT_EMAIL_FROM?: string;
   ACCOUNT_SIGNUP_THRESHOLD?: string;
+  ACCOUNT_AUTO_CONFIRM_IF_EMAIL_UNAVAILABLE?: string;
   APP_REVIEW_EMAIL?: string;
   APP_REVIEW_PASSWORD?: string;
   VIBE_BETA_ACCESS_TOKEN?: string;
   VIBE_BETA_GATE_MODE?: string;
+  ADMIN_EMAILS?: string;
+  CF_ACCESS_TEAM_DOMAIN?: string;
+  CF_ACCESS_AUD?: string;
+  ANALYTICS_SECRET?: string;
   SIGNUP_EMAIL?: AccountEmailSender;
+};
+
+type AnalyticsRecord = {
+  eventName: AnalyticsEventName;
+  deviceIDHash: string;
+  platform: string | null;
+  appVersion: string | null;
+  properties: Record<string, string>;
+  createdAt?: string;
+};
+
+type AnalyticsCounters = {
+  appOpen: number;
+  search: number;
+  placeSelect: number;
+  vibeSubmit: number;
+  accountEvent: number;
+};
+
+type AnalyticsDailyRow = {
+  day: string;
+  active_devices: number | null;
+  new_devices: number | null;
+  event_count: number | null;
+  app_open_count: number | null;
+  search_count: number | null;
+  place_select_count: number | null;
+  vibe_submit_count: number | null;
+  account_event_count: number | null;
+};
+
+type AnalyticsSummaryRow = {
+  active_today: number | null;
+  active_7d: number | null;
+  active_30d: number | null;
+  events_30d: number | null;
+  app_opens_30d: number | null;
+  searches_30d: number | null;
+  place_selects_30d: number | null;
+  vibes_30d: number | null;
+  account_events_30d: number | null;
+};
+
+type AnalyticsNewDevicesRow = {
+  new_devices_30d: number | null;
+};
+
+type AnalyticsContentTotalsRow = {
+  total_vibes: number | null;
+  total_vibed_places: number | null;
+  total_anonymous_vibers: number | null;
+  vibes_30d: number | null;
+  anonymous_vibers_30d: number | null;
+  vibed_places_30d: number | null;
+  first_vibe_at: string | null;
+  last_vibe_at: string | null;
+};
+
+type VibeHistoryDailyRow = {
+  day: string;
+  vibe_submissions: number | null;
+  unique_vibers: number | null;
+  vibed_places: number | null;
+};
+
+type AnalyticsRetentionRow = {
+  cohort_devices: number | null;
+  retained_devices: number | null;
+};
+
+type AnalyticsNameCountRow = {
+  name: string | null;
+  count: number | null;
+};
+
+type AdminDeviceLabelRow = {
+  id: string;
+  identity_type: AdminDeviceLabelIdentityType;
+  identity_id: string;
+  label: string;
+  category: AdminDeviceLabelCategory;
+  excluded_from_core_metrics: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  analytics_event_count: number | null;
+  analytics_vibe_submit_count: number | null;
+  historical_vibe_count: number | null;
+  last_seen_at: string | null;
+};
+
+type AdminRecentDeviceRow = {
+  identity_type: AdminDeviceLabelIdentityType;
+  identity_id: string;
+  label: string | null;
+  category: AdminDeviceLabelCategory | null;
+  excluded_from_core_metrics: number | null;
+  event_count: number | null;
+  vibe_submit_count: number | null;
+  historical_vibe_count: number | null;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  app_version: string | null;
+};
+
+type AdminExcludedSummaryRow = {
+  excluded_analytics_devices_30d: number | null;
+  excluded_historical_vibers_30d: number | null;
+  excluded_historical_vibes_30d: number | null;
 };
 
 type ProfileRow = {
@@ -314,6 +484,7 @@ type ProfileTokenRow = {
   id: string;
   profile_id: string;
   token_hash: string;
+  purpose: AccountEmailPurpose;
   redirect_url: string | null;
   expires_at: string;
   consumed_at: string | null;
@@ -348,6 +519,10 @@ export default {
 
     const url = new URL(request.url);
     const path = normalizedPath(url.pathname);
+    if (isAdminRequest(url, path)) {
+      return handleAdminRequest(request, url, path, env);
+    }
+
     if (!hasBetaAccess(request, env, path)) {
       return json({ error: "Beta access required." }, { status: 403 });
     }
@@ -364,28 +539,28 @@ export default {
         if (request.method === "HEAD") {
           return headResponse(landingPage(request, env));
         }
-        return cachedGET(request, ctx, CACHE_TTL_SECONDS.marketing, () => landingPage(request, env));
+        return landingPage(request, env);
       }
 
       if (isReadRequest && path === "/privacy") {
         if (request.method === "HEAD") {
           return headResponse(privacyPage(request, env));
         }
-        return cachedGET(request, ctx, CACHE_TTL_SECONDS.marketing, () => privacyPage(request, env));
+        return privacyPage(request, env);
       }
 
       if (isReadRequest && path === "/terms") {
         if (request.method === "HEAD") {
           return headResponse(termsPage(request, env));
         }
-        return cachedGET(request, ctx, CACHE_TTL_SECONDS.marketing, () => termsPage(request, env));
+        return termsPage(request, env);
       }
 
       if (isReadRequest && path === "/support") {
         if (request.method === "HEAD") {
           return headResponse(supportPage(request, env));
         }
-        return cachedGET(request, ctx, CACHE_TTL_SECONDS.marketing, () => supportPage(request, env));
+        return supportPage(request, env);
       }
 
       if ((request.method === "GET" || request.method === "HEAD") && path === "/account/review-login") {
@@ -420,8 +595,20 @@ export default {
         return getAccountEligibility(request, env);
       }
 
+      if (request.method === "POST" && path === "/analytics/events") {
+        return collectAnalyticsEvent(request, env, ctx);
+      }
+
       if (request.method === "POST" && path === "/account/signup") {
         return requestAccountSignup(request, env);
+      }
+
+      if (request.method === "POST" && (path === "/account/recovery" || path === "/account/login")) {
+        return requestAccountRecovery(request, env);
+      }
+
+      if (request.method === "POST" && path === "/account/logout") {
+        return requestAccountLogout(request, env);
       }
 
       if (request.method === "POST" && path === "/account/delete") {
@@ -448,7 +635,7 @@ export default {
       }
 
       if (request.method === "POST" && (path === "/vibes" || path === "/ratings")) {
-        return upsertVibe(request, env);
+        return upsertVibe(request, env, ctx);
       }
 
       if (request.method === "POST" && path === "/reports") {
@@ -476,9 +663,1675 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
+async function handleAdminRequest(request: Request, url: URL, path: string, env: Env): Promise<Response> {
+  const access = await verifyAdminAccess(request, env);
+  if (!access.ok) {
+    return access.response;
+  }
+
+  const adminPath = adminPathForRequest(url, path);
+  const isReadRequest = request.method === "GET" || request.method === "HEAD";
+
+  if (isReadRequest && (adminPath === "/admin" || adminPath === "/admin/")) {
+    const response = adminDashboardPage(access.email);
+    return request.method === "HEAD" ? headResponse(response) : response;
+  }
+
+  if (isReadRequest && adminPath === "/admin/analytics.json") {
+    const response = json(await buildAdminAnalyticsPayload(env, adminAnalyticsOptions(url)), { headers: adminJSONHeaders() });
+    return request.method === "HEAD" ? headResponse(response) : response;
+  }
+
+  if (request.method === "POST" && adminPath === "/admin/device-labels") {
+    return upsertAdminDeviceLabel(request, env);
+  }
+
+  return adminMessagePage("Admin route not found.", 404);
+}
+
+function isAdminRequest(url: URL, path: string): boolean {
+  return url.hostname.toLowerCase() === ADMIN_HOST || path === "/admin" || path.startsWith("/admin/");
+}
+
+function adminPathForRequest(url: URL, path: string): string {
+  if (url.hostname.toLowerCase() !== ADMIN_HOST) {
+    return path;
+  }
+
+  if (path === "/") {
+    return "/admin";
+  }
+
+  if (path.startsWith("/admin/") || path === "/admin") {
+    return path;
+  }
+
+  return `/admin${path}`;
+}
+
+async function verifyAdminAccess(
+  request: Request,
+  env: Env
+): Promise<{ ok: true; email: string } | { ok: false; response: Response }> {
+  const runtimeEnv = env as RuntimeEnv;
+  const allowedEmails = allowedAdminEmails(runtimeEnv.ADMIN_EMAILS);
+  const teamDomain = normalizedAccessTeamDomain(runtimeEnv.CF_ACCESS_TEAM_DOMAIN);
+  const audience = cleanString(runtimeEnv.CF_ACCESS_AUD);
+
+  if (allowedEmails.size === 0) {
+    return { ok: false, response: adminMessagePage("Admin access is not configured.", 503) };
+  }
+
+  if (!teamDomain || !audience) {
+    return {
+      ok: false,
+      response: adminMessagePage("Cloudflare Access JWT validation is not configured for this Worker.", 503),
+    };
+  }
+
+  const token = cleanString(request.headers.get(ADMIN_ACCESS_JWT_HEADER));
+  if (!token) {
+    return { ok: false, response: adminMessagePage("Cloudflare Access sign-in is required.", 401) };
+  }
+
+  try {
+    const jwks = createRemoteJWKSet(new URL(`${teamDomain}/cdn-cgi/access/certs`));
+    const { payload } = await jwtVerify(token, jwks, {
+      issuer: teamDomain,
+      audience,
+    });
+    const payloadEmail = typeof payload.email === "string" ? normalizeEmail(payload.email) : null;
+    const headerEmail = normalizeEmail(request.headers.get(ADMIN_ACCESS_EMAIL_HEADER));
+    const email = payloadEmail ?? headerEmail;
+
+    if (!email || !allowedEmails.has(email)) {
+      return { ok: false, response: adminMessagePage("This Cloudflare account is not allowed here.", 403) };
+    }
+
+    return { ok: true, email };
+  } catch (error) {
+    console.log(JSON.stringify({ message: "Admin Access JWT rejected.", error: String(error) }));
+    return { ok: false, response: adminMessagePage("Cloudflare Access could not verify this session.", 403) };
+  }
+}
+
+function allowedAdminEmails(value: string | undefined): Set<string> {
+  return new Set(
+    (value ?? "")
+      .split(",")
+      .map((email) => normalizeEmail(email))
+      .filter((email): email is string => Boolean(email))
+  );
+}
+
+function normalizedAccessTeamDomain(value: string | undefined): string | null {
+  const trimmed = cleanString(value);
+  if (!trimmed) {
+    return null;
+  }
+
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  return withProtocol.replace(/\/+$/, "");
+}
+
+function adminMessagePage(message: string, status: number): Response {
+  return html(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>VIBES Y'ALL Admin</title>
+  <style>${adminCSS()}</style>
+</head>
+<body>
+  <main class="admin-shell narrow">
+    <p class="eyebrow">VIBES Y'ALL Admin</p>
+    <h1>${escapeHTML(message)}</h1>
+  </main>
+</body>
+</html>`, { status, headers: adminHTMLHeaders() });
+}
+
+function adminDashboardPage(email: string): Response {
+  return html(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>VIBES Y'ALL Analytics</title>
+  <style>${adminCSS()}</style>
+</head>
+<body>
+  <main class="admin-shell">
+    <header class="admin-header">
+      <div>
+        <p class="eyebrow">VIBES Y'ALL Admin</p>
+        <h1>Analytics</h1>
+      </div>
+      <p class="session">Signed in with Cloudflare Access as <strong>${escapeHTML(email)}</strong></p>
+    </header>
+
+    <section id="status" class="status">Loading analytics...</section>
+    <section class="status controls">
+      <label class="toggle-row">
+        <input id="exclude-internal" type="checkbox" checked>
+        <span>
+          <strong>Exclude internal testers</strong>
+          <small>Default public-growth view. Turn off to compare against all tracked traffic.</small>
+        </span>
+      </label>
+      <span id="filter-mode" class="pill">Public trend view</span>
+    </section>
+    <section id="summary" class="metric-grid"></section>
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>Usage Trend</h2>
+        <span>Tracked events, last 30 days</span>
+      </div>
+      <div id="trend" class="trend"></div>
+    </section>
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>Vibe History</h2>
+        <span>Saved submissions, last 30 days</span>
+      </div>
+      <div id="history" class="trend"></div>
+    </section>
+    <section class="two-column">
+      <div class="panel">
+        <div class="panel-heading">
+          <h2>Event Mix</h2>
+          <span>Last 30 days</span>
+        </div>
+        <div id="events" class="list"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-heading">
+          <h2>App Versions</h2>
+          <span>Active devices</span>
+        </div>
+        <div id="versions" class="list"></div>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>Device Labels</h2>
+        <span>Admin-only filters</span>
+      </div>
+      <form id="device-label-form" class="device-label-form">
+        <select id="label-identity-type" aria-label="Identity type">
+          <option value="analytics_device">Analytics device</option>
+          <option value="anonymous_user">Vibe-history device</option>
+        </select>
+        <input id="label-identity-id" type="text" placeholder="Device id" autocomplete="off" required>
+        <input id="label-name" type="text" placeholder="Label, e.g. Brian or Rich" autocomplete="off" required>
+        <select id="label-category" aria-label="Category">
+          <option value="internal">Internal</option>
+          <option value="reviewer">Reviewer</option>
+          <option value="external">External</option>
+          <option value="unknown">Unknown</option>
+        </select>
+        <label class="compact-toggle">
+          <input id="label-excluded" type="checkbox" checked>
+          Exclude
+        </label>
+        <button type="submit">Save Label</button>
+      </form>
+      <div id="label-status" class="form-status"></div>
+    </section>
+    <section class="two-column">
+      <div class="panel">
+        <div class="panel-heading">
+          <h2>Current Labels</h2>
+          <span>Filtered when excluded</span>
+        </div>
+        <div id="device-labels" class="device-list"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-heading">
+          <h2>Recent Unlabeled</h2>
+          <span>Tap Tag to fill the form</span>
+        </div>
+        <div id="recent-devices" class="device-list"></div>
+      </div>
+    </section>
+  </main>
+  <script>
+    const analyticsBasePath = location.hostname === "${ADMIN_HOST}" ? "/analytics.json" : "/admin/analytics.json";
+    const labelPath = location.hostname === "${ADMIN_HOST}" ? "/device-labels" : "/admin/device-labels";
+    const numberFormat = new Intl.NumberFormat();
+    let currentPayload = null;
+
+    function number(value) {
+      return numberFormat.format(Number(value || 0));
+    }
+
+    function percent(value) {
+      return Number.isFinite(value) ? value.toFixed(1) + "%" : "n/a";
+    }
+
+    function shortDate(value) {
+      if (!value) return "n/a";
+      return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    }
+
+    function escapeText(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      }[character]));
+    }
+
+    function shortID(value) {
+      const text = String(value || "");
+      return text.length > 24 ? text.slice(0, 18) + "..." + text.slice(-6) : text;
+    }
+
+    function analyticsPath() {
+      const params = new URLSearchParams();
+      if (!document.getElementById("exclude-internal").checked) {
+        params.set("include_internal", "1");
+      }
+      const query = params.toString();
+      return analyticsBasePath + (query ? "?" + query : "");
+    }
+
+    function metric(label, value, detail) {
+      return '<article class="metric"><span>' + label + '</span><strong>' + value + '</strong><small>' + detail + '</small></article>';
+    }
+
+    function listRow(label, value, max) {
+      const width = max > 0 ? Math.max(4, Math.round((Number(value || 0) / max) * 100)) : 0;
+      return '<div class="list-row"><div><strong>' + label + '</strong><span>' + number(value) + '</span></div><i style="width:' + width + '%"></i></div>';
+    }
+
+    function columnChart(rows, valueKey, detailKey, valueLabel, detailLabel) {
+      const values = rows.map((row) => Number(row[valueKey] || 0));
+      const max = Math.max(...values, 1);
+      const maxIndex = values.indexOf(max);
+      const lastValueIndex = values.reduce((lastIndex, value, index) => value > 0 ? index : lastIndex, -1);
+      return '<div class="chart-viewport"><div class="column-chart" style="--chart-columns:' + rows.length + ';">'
+        + rows.map((row, index) => {
+          const value = Number(row[valueKey] || 0);
+          const detail = Number(row[detailKey] || 0);
+          const label = row.day.slice(5);
+          const height = value > 0 ? Math.max(4, Math.round((value / max) * 100)) : 0;
+          const showTick = index === 0 || index === rows.length - 1 || index % 5 === 0;
+          const showValue = value > 0 && (index === maxIndex || index === lastValueIndex || rows.length <= 14);
+          const title = label + ': ' + number(value) + ' ' + valueLabel + ', ' + number(detail) + ' ' + detailLabel;
+          return '<div class="column-bar' + (showTick ? ' has-tick' : '') + (showValue ? ' has-value' : '') + '" title="' + escapeText(title) + '" aria-label="' + escapeText(title) + '">'
+            + '<span>' + (showValue ? number(value) : '') + '</span>'
+            + '<i style="height:' + height + '%"></i>'
+            + '<em>' + (showTick ? escapeText(label) : '') + '</em>'
+            + '</div>';
+        }).join("")
+        + '</div></div>';
+    }
+
+    function deviceMeta(row) {
+      const parts = [];
+      if (row.eventCount) parts.push(number(row.eventCount) + " events");
+      if (row.vibeSubmitCount) parts.push(number(row.vibeSubmitCount) + " tracked vibe submits");
+      if (row.historicalVibeCount) parts.push(number(row.historicalVibeCount) + " saved vibes");
+      if (row.appVersion) parts.push(row.appVersion);
+      if (row.lastSeenAt) parts.push("last " + new Date(row.lastSeenAt).toLocaleString());
+      return parts.length ? parts.join(" · ") : "No activity yet";
+    }
+
+    function labelDeviceRow(row) {
+      const excluded = row.excludedFromCoreMetrics ? "Excluded" : "Included";
+      return '<div class="device-row">'
+        + '<div><strong>' + escapeText(row.label) + '</strong><span>' + escapeText(row.category) + ' · ' + excluded + '</span></div>'
+        + '<code title="' + escapeText(row.identityId) + '">' + escapeText(shortID(row.identityId)) + '</code>'
+        + '<small>' + escapeText(row.identityType.replace("_", " ")) + ' · ' + escapeText(deviceMeta(row)) + '</small>'
+        + '</div>';
+    }
+
+    function recentDeviceRow(row, index) {
+      return '<div class="device-row actionable">'
+        + '<div><strong>' + escapeText(row.identityType.replace("_", " ")) + '</strong><span>' + escapeText(deviceMeta(row)) + '</span></div>'
+        + '<code title="' + escapeText(row.identityId) + '">' + escapeText(shortID(row.identityId)) + '</code>'
+        + '<button type="button" data-recent-index="' + index + '">Tag</button>'
+        + '</div>';
+    }
+
+    function render(payload) {
+      currentPayload = payload;
+      const publicMode = !payload.filters.includeInternal;
+      document.getElementById("filter-mode").textContent = publicMode ? "Public trend view" : "All tracked traffic";
+      document.getElementById("status").textContent = "Updated " + new Date(payload.generatedAt).toLocaleString()
+        + (publicMode ? " · internal testers excluded" : " · internal testers included");
+      const summary = payload.summary;
+      document.getElementById("summary").innerHTML = [
+        metric("Active today", number(summary.activeToday), "Unique anonymous devices"),
+        metric("Active 7 days", number(summary.active7d), "Weekly active devices"),
+        metric("Active 30 days", number(summary.active30d), "Monthly active devices"),
+        metric("New devices", number(summary.newDevices30d), "First seen in 30 days"),
+        metric("Excluded devices", number(summary.excludedAnalyticsDevices30d), "Internal analytics IDs in 30 days"),
+        metric("Total vibes", number(summary.totalVibes), summary.firstVibeAt ? "Since " + shortDate(summary.firstVibeAt) : "All time"),
+        metric("Vibed places", number(summary.totalVibedPlaces), "All-time unique places"),
+        metric("Historical devices", number(summary.totalAnonymousVibers), "From saved vibe history"),
+        metric("Excluded seed vibes", number(summary.excludedHistoricalVibes30d), "Internal saved vibes in 30 days"),
+        metric("Vibes submitted", number(summary.vibeSubmissions30d), "Saved history, 30 days"),
+        metric("Vibes/device", summary.vibesPerDevice30d.toFixed(2), "Saved history, 30 days"),
+        metric("Tracked searches", number(summary.searches30d), "Analytics-only, no raw query text"),
+        metric("D1 / D7 retention", percent(summary.retention.day1Rate) + " / " + percent(summary.retention.day7Rate), "First seen cohorts")
+      ].join("");
+
+      document.getElementById("trend").innerHTML = columnChart(
+        payload.daily,
+        "activeDevices",
+        "vibeSubmissions",
+        "active devices",
+        "vibes"
+      );
+
+      document.getElementById("history").innerHTML = columnChart(
+        payload.vibeHistoryDaily,
+        "vibeSubmissions",
+        "uniqueVibers",
+        "vibes",
+        "devices"
+      );
+
+      const maxEvents = Math.max(...payload.topEvents.map((row) => row.count), 1);
+      document.getElementById("events").innerHTML = payload.topEvents.map((row) => listRow(row.name, row.count, maxEvents)).join("") || '<p class="empty">No events yet.</p>';
+
+      const maxVersions = Math.max(...payload.appVersions.map((row) => row.count), 1);
+      document.getElementById("versions").innerHTML = payload.appVersions.map((row) => listRow(row.name || "Unknown", row.count, maxVersions)).join("") || '<p class="empty">No app versions yet.</p>';
+
+      document.getElementById("device-labels").innerHTML = payload.deviceLabels.map(labelDeviceRow).join("") || '<p class="empty">No labeled devices yet.</p>';
+      document.getElementById("recent-devices").innerHTML = payload.recentDevices.map(recentDeviceRow).join("") || '<p class="empty">No recent unlabeled devices.</p>';
+    }
+
+    function loadAnalytics() {
+      document.getElementById("status").textContent = "Loading analytics...";
+      return fetch(analyticsPath(), { headers: { "Accept": "application/json" } })
+      .then((response) => {
+        if (!response.ok) throw new Error("Analytics request failed.");
+        return response.json();
+      })
+      .then(render)
+      .catch((error) => {
+        document.getElementById("status").textContent = error.message;
+      });
+    }
+
+    document.getElementById("exclude-internal").addEventListener("change", loadAnalytics);
+    document.getElementById("recent-devices").addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-recent-index]");
+      if (!button || !currentPayload) return;
+      const row = currentPayload.recentDevices[Number(button.dataset.recentIndex)];
+      if (!row) return;
+      document.getElementById("label-identity-type").value = row.identityType;
+      document.getElementById("label-identity-id").value = row.identityId;
+      document.getElementById("label-name").focus();
+    });
+    document.getElementById("device-label-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const status = document.getElementById("label-status");
+      status.textContent = "Saving label...";
+      const payload = {
+        identity_type: document.getElementById("label-identity-type").value,
+        identity_id: document.getElementById("label-identity-id").value,
+        label: document.getElementById("label-name").value,
+        category: document.getElementById("label-category").value,
+        excluded_from_core_metrics: document.getElementById("label-excluded").checked
+      };
+      try {
+        const response = await fetch(labelPath, {
+          method: "POST",
+          headers: { "Accept": "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(result.error || "Device label could not be saved.");
+        }
+        status.textContent = "Saved.";
+        document.getElementById("device-label-form").reset();
+        document.getElementById("label-excluded").checked = true;
+        await loadAnalytics();
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    });
+    loadAnalytics();
+  </script>
+</body>
+</html>`, { headers: adminHTMLHeaders() });
+}
+
+function adminCSS(): string {
+  return `
+    :root {
+      --navy: #102c6b;
+      --yellow: #dfd771;
+      --ink: #071321;
+      --muted: #657184;
+      --line: rgba(16, 44, 107, 0.14);
+      --surface: rgba(255, 255, 255, 0.82);
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #f7f5ef;
+      color: var(--ink);
+    }
+    .admin-shell {
+      width: min(100%, 72rem);
+      margin: 0 auto;
+      padding: clamp(1.5rem, 4vw, 3rem);
+    }
+    .admin-shell.narrow { width: min(100%, 42rem); }
+    .admin-header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.2rem;
+    }
+    .eyebrow {
+      color: var(--navy);
+      font-size: 0.82rem;
+      font-weight: 850;
+      letter-spacing: 0.08em;
+      margin: 0 0 0.35rem;
+      text-transform: uppercase;
+    }
+    h1, h2 { margin: 0; letter-spacing: 0; }
+    h1 { font-size: clamp(2.5rem, 7vw, 5rem); line-height: 0.92; }
+    h2 { font-size: 1.2rem; }
+    .session, .status, .panel-heading span, .metric small, .list-row span, .empty {
+      color: var(--muted);
+      font-weight: 650;
+    }
+    .session { text-align: right; margin: 0 0 0.45rem; }
+    .status {
+      border: 1px solid var(--line);
+      border-radius: 0.5rem;
+      background: var(--surface);
+      padding: 0.8rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .toggle-row, .compact-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      color: var(--ink);
+      font-weight: 800;
+    }
+    .toggle-row small {
+      display: block;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 650;
+      margin-top: 0.15rem;
+    }
+    .toggle-row input, .compact-toggle input {
+      width: 1.1rem;
+      height: 1.1rem;
+      accent-color: var(--navy);
+      flex: 0 0 auto;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(223, 215, 113, 0.28);
+      color: var(--navy);
+      font-size: 0.82rem;
+      font-weight: 850;
+      padding: 0.4rem 0.7rem;
+      white-space: nowrap;
+    }
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.85rem;
+      margin-bottom: 0.85rem;
+    }
+    .metric, .panel {
+      border: 1px solid var(--line);
+      border-radius: 0.5rem;
+      background: var(--surface);
+      box-shadow: 0 1rem 2.2rem rgba(16, 44, 107, 0.07);
+    }
+    .metric {
+      display: grid;
+      gap: 0.25rem;
+      padding: 1rem;
+    }
+    .metric span {
+      color: var(--navy);
+      font-weight: 850;
+      font-size: 0.9rem;
+    }
+    .metric strong {
+      font-size: 2rem;
+      line-height: 1;
+    }
+    .panel {
+      padding: 1rem;
+      margin-bottom: 0.85rem;
+    }
+    .panel-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 0.9rem;
+    }
+    .trend {
+      display: grid;
+      gap: 0.55rem;
+    }
+    .chart-viewport {
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 0 0.1rem 0.15rem;
+      margin: 0 -0.1rem;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(16, 44, 107, 0.35) transparent;
+      -webkit-overflow-scrolling: touch;
+    }
+    .chart-viewport::-webkit-scrollbar {
+      height: 0.35rem;
+    }
+    .chart-viewport::-webkit-scrollbar-thumb {
+      background: rgba(16, 44, 107, 0.25);
+      border-radius: 999px;
+    }
+    .column-chart {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(var(--chart-columns), minmax(0, 1fr));
+      align-items: stretch;
+      gap: 0.35rem;
+      min-width: max(100%, calc(var(--chart-columns) * 0.95rem));
+      min-height: 11rem;
+      padding: 0.25rem 0.15rem 0;
+    }
+    .column-chart::before {
+      content: "";
+      position: absolute;
+      inset: 1.15rem 0.15rem 1.35rem;
+      background: linear-gradient(to top, rgba(16, 44, 107, 0.08) 1px, transparent 1px);
+      background-size: 100% 25%;
+      pointer-events: none;
+    }
+    .column-bar {
+      position: relative;
+      display: grid;
+      grid-template-rows: 1rem minmax(0, 1fr) 1.05rem;
+      justify-items: center;
+      align-items: end;
+      min-width: 0;
+      gap: 0.18rem;
+      z-index: 1;
+    }
+    .column-bar span {
+      color: var(--ink);
+      font-size: 0.68rem;
+      font-weight: 850;
+      line-height: 1;
+      min-height: 1rem;
+      max-width: 2.4rem;
+      overflow: hidden;
+      text-align: center;
+      text-overflow: ellipsis;
+    }
+    .column-bar i {
+      align-self: end;
+      display: block;
+      width: clamp(0.45rem, 65%, 1.1rem);
+      min-height: 0;
+      border-radius: 0.35rem 0.35rem 0.12rem 0.12rem;
+      background: var(--navy);
+    }
+    .column-bar em {
+      color: var(--muted);
+      font-style: normal;
+      font-size: 0.66rem;
+      font-weight: 750;
+      line-height: 1;
+      min-height: 1rem;
+      max-width: 2.7rem;
+      overflow: hidden;
+      text-align: center;
+      text-overflow: clip;
+      white-space: nowrap;
+    }
+    .list-row i {
+      display: block;
+      height: 0.95rem;
+      border-radius: 999px;
+      background: rgba(16, 44, 107, 0.09);
+      overflow: hidden;
+    }
+    .list-row i::before {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--navy);
+      content: "";
+    }
+    .two-column {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.85rem;
+    }
+    .list {
+      display: grid;
+      gap: 0.65rem;
+    }
+    .list-row {
+      display: grid;
+      gap: 0.35rem;
+    }
+    .list-row div {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .list-row i {
+      max-width: 100%;
+    }
+    .device-label-form {
+      display: grid;
+      grid-template-columns: 11rem minmax(12rem, 1.1fr) minmax(10rem, 0.9fr) 9rem auto auto;
+      gap: 0.65rem;
+      align-items: center;
+    }
+    .device-label-form input,
+    .device-label-form select,
+    .device-label-form button {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 0.5rem;
+      background: rgba(255, 255, 255, 0.9);
+      color: var(--ink);
+      font: inherit;
+      font-weight: 750;
+      min-height: 2.7rem;
+      padding: 0.65rem 0.75rem;
+    }
+    .device-label-form button {
+      background: var(--navy);
+      color: white;
+      cursor: pointer;
+    }
+    .compact-toggle {
+      justify-content: center;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .form-status {
+      color: var(--muted);
+      font-weight: 700;
+      min-height: 1.2rem;
+      margin-top: 0.65rem;
+    }
+    .device-list {
+      display: grid;
+      gap: 0.7rem;
+    }
+    .device-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 0.35rem 0.8rem;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 0.7rem;
+    }
+    .device-row:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+    .device-row strong,
+    .device-row span,
+    .device-row small {
+      display: block;
+    }
+    .device-row span,
+    .device-row small {
+      color: var(--muted);
+      font-size: 0.84rem;
+      font-weight: 650;
+    }
+    .device-row code {
+      color: var(--navy);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.76rem;
+      font-weight: 800;
+      max-width: 16rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .device-row small {
+      grid-column: 1 / -1;
+    }
+    .device-row button {
+      border: 1px solid var(--line);
+      border-radius: 0.5rem;
+      background: var(--navy);
+      color: white;
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.84rem;
+      font-weight: 850;
+      padding: 0.45rem 0.7rem;
+    }
+    @media (max-width: 760px) {
+      .admin-header, .two-column, .controls { display: block; }
+      .session { text-align: left; margin-top: 0.75rem; }
+      .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .panel-heading {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+      .panel-heading span { font-size: 0.9rem; }
+      .chart-viewport {
+        margin-inline: -0.25rem;
+        padding-inline: 0.25rem;
+      }
+      .column-chart {
+        gap: 0.18rem;
+        min-width: max(100%, calc(var(--chart-columns) * 0.78rem));
+        min-height: 9.5rem;
+      }
+      .column-bar {
+        grid-template-rows: 0.9rem minmax(0, 1fr) 0.95rem;
+        gap: 0.12rem;
+      }
+      .column-bar span { font-size: 0.56rem; }
+      .column-bar i {
+        width: clamp(0.34rem, 62%, 0.66rem);
+        border-radius: 0.25rem 0.25rem 0.1rem 0.1rem;
+      }
+      .column-bar em { font-size: 0.55rem; }
+      .pill { display: inline-block; margin-top: 0.75rem; }
+      .device-label-form { grid-template-columns: 1fr; }
+      .compact-toggle { justify-content: flex-start; }
+    }
+  `;
+}
+
+function adminHTMLHeaders(): Headers {
+  const headers = new Headers();
+  headers.set("Cache-Control", "no-store");
+  headers.set("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'");
+  headers.set("Referrer-Policy", "no-referrer");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("X-Robots-Tag", "noindex, nofollow");
+  return headers;
+}
+
+function adminJSONHeaders(): Headers {
+  const headers = adminHTMLHeaders();
+  headers.set("Content-Type", "application/json; charset=utf-8");
+  return headers;
+}
+
+function adminAnalyticsOptions(url: URL): AdminAnalyticsOptions {
+  return {
+    includeInternal: ["1", "true", "yes"].includes((url.searchParams.get("include_internal") ?? "").toLowerCase()),
+  };
+}
+
+function adminAnalyticsDeviceAllowedSQL(alias: string, options: AdminAnalyticsOptions): string {
+  if (options.includeInternal) {
+    return "1 = 1";
+  }
+
+  return `NOT EXISTS (
+    SELECT 1
+    FROM admin_device_labels dl
+    WHERE dl.identity_type = 'analytics_device'
+      AND dl.identity_id = ${alias}.analytics_device_id
+      AND dl.excluded_from_core_metrics = 1
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM device_identity_links dil
+    JOIN admin_device_labels linked_dl
+      ON linked_dl.identity_type = 'anonymous_user'
+     AND linked_dl.identity_id = dil.anonymous_user_id
+     AND linked_dl.excluded_from_core_metrics = 1
+    WHERE dil.analytics_device_id = ${alias}.analytics_device_id
+  )`;
+}
+
+function adminAnonymousUserAllowedSQL(alias: string, options: AdminAnalyticsOptions): string {
+  if (options.includeInternal) {
+    return "1 = 1";
+  }
+
+  return `NOT EXISTS (
+    SELECT 1
+    FROM admin_device_labels dl
+    WHERE dl.identity_type = 'anonymous_user'
+      AND dl.identity_id = ${alias}.anonymous_user_id
+      AND dl.excluded_from_core_metrics = 1
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM device_identity_links dil
+    JOIN admin_device_labels linked_dl
+      ON linked_dl.identity_type = 'analytics_device'
+     AND linked_dl.identity_id = dil.analytics_device_id
+     AND linked_dl.excluded_from_core_metrics = 1
+    WHERE dil.anonymous_user_id = ${alias}.anonymous_user_id
+  )`;
+}
+
+function activeEventWhere(alias?: string): string {
+  if (!alias) {
+    return ACTIVE_EVENT_WHERE;
+  }
+
+  return `${alias}.moderation_status = 'active' AND ${alias}.is_deleted = 0`;
+}
+
+async function buildAdminAnalyticsPayload(env: Env, options: AdminAnalyticsOptions = { includeInternal: false }) {
+  const today = dayString(new Date());
+  const since7 = addDays(today, -6);
+  const since30 = addDays(today, -29);
+  const day1Retention = await fetchRetentionMetric(env, 1, since30, addDays(today, -1), options);
+  const day7Retention = await fetchRetentionMetric(env, 7, since30, addDays(today, -7), options);
+  const analyticsDeviceFilter = adminAnalyticsDeviceAllowedSQL("dd", options);
+  const analyticsDevicesFilter = adminAnalyticsDeviceAllowedSQL("ad", options);
+  const analyticsEventsFilter = adminAnalyticsDeviceAllowedSQL("ae", options);
+  const anonymousUserFilter = adminAnonymousUserAllowedSQL("ve", options);
+  const [summary, newDevices, contentTotals, excludedSummary, dailyResult, vibeHistoryResult, eventsResult, versionsResult, labelsResult, recentAnalyticsDevices, recentAnonymousUsers] = await Promise.all([
+    env.DB.prepare(
+      `SELECT
+         COUNT(DISTINCT CASE WHEN dd.day = ? THEN dd.analytics_device_id END) AS active_today,
+         COUNT(DISTINCT CASE WHEN dd.day >= ? THEN dd.analytics_device_id END) AS active_7d,
+         COUNT(DISTINCT CASE WHEN dd.day >= ? THEN dd.analytics_device_id END) AS active_30d,
+         COALESCE(SUM(CASE WHEN dd.day >= ? THEN dd.event_count ELSE 0 END), 0) AS events_30d,
+         COALESCE(SUM(CASE WHEN dd.day >= ? THEN dd.app_open_count ELSE 0 END), 0) AS app_opens_30d,
+         COALESCE(SUM(CASE WHEN dd.day >= ? THEN dd.search_count ELSE 0 END), 0) AS searches_30d,
+         COALESCE(SUM(CASE WHEN dd.day >= ? THEN dd.place_select_count ELSE 0 END), 0) AS place_selects_30d,
+         COALESCE(SUM(CASE WHEN dd.day >= ? THEN dd.vibe_submit_count ELSE 0 END), 0) AS vibes_30d,
+         COALESCE(SUM(CASE WHEN dd.day >= ? THEN dd.account_event_count ELSE 0 END), 0) AS account_events_30d
+       FROM analytics_device_days dd
+       WHERE dd.day >= ?
+         AND ${analyticsDeviceFilter}`
+    )
+      .bind(today, since7, since30, since30, since30, since30, since30, since30, since30, since30)
+      .first<AnalyticsSummaryRow>(),
+    env.DB.prepare(`SELECT COUNT(*) AS new_devices_30d FROM analytics_devices ad WHERE ad.first_seen_day >= ? AND ${analyticsDevicesFilter}`)
+      .bind(since30)
+      .first<AnalyticsNewDevicesRow>(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS total_vibes,
+              COUNT(DISTINCT place_id) AS total_vibed_places,
+              COUNT(DISTINCT anonymous_user_id) AS total_anonymous_vibers,
+              COUNT(CASE WHEN substr(created_at, 1, 10) >= ? THEN 1 END) AS vibes_30d,
+              COUNT(DISTINCT CASE WHEN substr(created_at, 1, 10) >= ? THEN anonymous_user_id END) AS anonymous_vibers_30d,
+              COUNT(DISTINCT CASE WHEN substr(created_at, 1, 10) >= ? THEN place_id END) AS vibed_places_30d,
+              MIN(created_at) AS first_vibe_at,
+              MAX(created_at) AS last_vibe_at
+       FROM vibe_events ve
+       WHERE ${activeEventWhere("ve")}
+         AND ${anonymousUserFilter}`
+    )
+      .bind(since30, since30, since30)
+      .first<AnalyticsContentTotalsRow>(),
+    env.DB.prepare(
+      `SELECT
+         (SELECT COUNT(DISTINCT dd.analytics_device_id)
+          FROM analytics_device_days dd
+          INNER JOIN admin_device_labels dl
+            ON dl.identity_type = 'analytics_device'
+           AND dl.identity_id = dd.analytics_device_id
+           AND dl.excluded_from_core_metrics = 1
+          WHERE dd.day >= ?) AS excluded_analytics_devices_30d,
+         (SELECT COUNT(DISTINCT ve.anonymous_user_id)
+          FROM vibe_events ve
+          INNER JOIN admin_device_labels dl
+            ON dl.identity_type = 'anonymous_user'
+           AND dl.identity_id = ve.anonymous_user_id
+           AND dl.excluded_from_core_metrics = 1
+          WHERE ${activeEventWhere("ve")}
+            AND substr(ve.created_at, 1, 10) >= ?) AS excluded_historical_vibers_30d,
+         (SELECT COUNT(*)
+          FROM vibe_events ve
+          INNER JOIN admin_device_labels dl
+            ON dl.identity_type = 'anonymous_user'
+           AND dl.identity_id = ve.anonymous_user_id
+           AND dl.excluded_from_core_metrics = 1
+          WHERE ${activeEventWhere("ve")}
+            AND substr(ve.created_at, 1, 10) >= ?) AS excluded_historical_vibes_30d`
+    )
+      .bind(since30, since30, since30)
+      .first<AdminExcludedSummaryRow>(),
+    env.DB.prepare(
+      `SELECT
+         dd.day,
+         COUNT(*) AS active_devices,
+         (SELECT COUNT(*) FROM analytics_devices ad WHERE ad.first_seen_day = dd.day AND ${analyticsDevicesFilter}) AS new_devices,
+         COALESCE(SUM(dd.event_count), 0) AS event_count,
+         COALESCE(SUM(dd.app_open_count), 0) AS app_open_count,
+         COALESCE(SUM(dd.search_count), 0) AS search_count,
+         COALESCE(SUM(dd.place_select_count), 0) AS place_select_count,
+         COALESCE(SUM(dd.vibe_submit_count), 0) AS vibe_submit_count,
+         COALESCE(SUM(dd.account_event_count), 0) AS account_event_count
+       FROM analytics_device_days dd
+       WHERE dd.day >= ?
+         AND ${analyticsDeviceFilter}
+       GROUP BY dd.day
+       ORDER BY dd.day ASC`
+    )
+      .bind(since30)
+      .all<AnalyticsDailyRow>(),
+    env.DB.prepare(
+      `SELECT
+         substr(created_at, 1, 10) AS day,
+         COUNT(*) AS vibe_submissions,
+         COUNT(DISTINCT anonymous_user_id) AS unique_vibers,
+         COUNT(DISTINCT place_id) AS vibed_places
+       FROM vibe_events ve
+       WHERE ${activeEventWhere("ve")}
+         AND ${anonymousUserFilter}
+         AND substr(ve.created_at, 1, 10) >= ?
+       GROUP BY substr(created_at, 1, 10)
+       ORDER BY day ASC`
+    )
+      .bind(since30)
+      .all<VibeHistoryDailyRow>(),
+    env.DB.prepare(
+      `SELECT ae.event_name AS name, COUNT(*) AS count
+       FROM analytics_events ae
+       WHERE ae.day >= ?
+         AND ${analyticsEventsFilter}
+       GROUP BY ae.event_name
+       ORDER BY count DESC, event_name ASC
+       LIMIT 12`
+    )
+      .bind(since30)
+      .all<AnalyticsNameCountRow>(),
+    env.DB.prepare(
+      `SELECT COALESCE(dd.app_version, 'Unknown') AS name, COUNT(DISTINCT dd.analytics_device_id) AS count
+       FROM analytics_device_days dd
+       WHERE dd.day >= ?
+         AND ${analyticsDeviceFilter}
+       GROUP BY COALESCE(dd.app_version, 'Unknown')
+       ORDER BY count DESC, name ASC
+       LIMIT 12`
+    )
+      .bind(since30)
+      .all<AnalyticsNameCountRow>(),
+    env.DB.prepare(
+      `SELECT
+         dl.id,
+         dl.identity_type,
+         dl.identity_id,
+         dl.label,
+         dl.category,
+         dl.excluded_from_core_metrics,
+         dl.notes,
+         dl.created_at,
+         dl.updated_at,
+         ad.event_count AS analytics_event_count,
+         ad.vibe_submit_count AS analytics_vibe_submit_count,
+         CASE WHEN dl.identity_type = 'anonymous_user' THEN (
+           SELECT COUNT(*)
+           FROM vibe_events ve
+           WHERE ve.anonymous_user_id = dl.identity_id
+             AND ${activeEventWhere("ve")}
+         ) ELSE 0 END AS historical_vibe_count,
+         CASE
+           WHEN dl.identity_type = 'analytics_device' THEN ad.last_seen_at
+           WHEN dl.identity_type = 'anonymous_user' THEN (
+             SELECT MAX(ve.updated_at)
+             FROM vibe_events ve
+             WHERE ve.anonymous_user_id = dl.identity_id
+               AND ${activeEventWhere("ve")}
+           )
+           ELSE NULL
+         END AS last_seen_at
+       FROM admin_device_labels dl
+       LEFT JOIN analytics_devices ad
+         ON dl.identity_type = 'analytics_device'
+        AND ad.analytics_device_id = dl.identity_id
+       ORDER BY dl.excluded_from_core_metrics DESC, dl.category ASC, dl.label ASC
+       LIMIT 80`
+    ).all<AdminDeviceLabelRow>(),
+    env.DB.prepare(
+      `SELECT
+         'analytics_device' AS identity_type,
+         ad.analytics_device_id AS identity_id,
+         dl.label,
+         dl.category,
+         dl.excluded_from_core_metrics,
+         ad.event_count,
+         ad.vibe_submit_count,
+         0 AS historical_vibe_count,
+         ad.first_seen_at,
+         ad.last_seen_at,
+         ad.app_version
+       FROM analytics_devices ad
+       LEFT JOIN admin_device_labels dl
+         ON dl.identity_type = 'analytics_device'
+        AND dl.identity_id = ad.analytics_device_id
+       WHERE dl.identity_id IS NULL
+         AND NOT EXISTS (
+           SELECT 1
+           FROM device_identity_links dil
+           JOIN admin_device_labels linked_dl
+             ON linked_dl.identity_type = 'anonymous_user'
+            AND linked_dl.identity_id = dil.anonymous_user_id
+            AND linked_dl.excluded_from_core_metrics = 1
+           WHERE dil.analytics_device_id = ad.analytics_device_id
+         )
+       ORDER BY ad.last_seen_at DESC
+       LIMIT 10`
+    ).all<AdminRecentDeviceRow>(),
+    env.DB.prepare(
+      `SELECT
+         'anonymous_user' AS identity_type,
+         ve.anonymous_user_id AS identity_id,
+         dl.label,
+         dl.category,
+         dl.excluded_from_core_metrics,
+         0 AS event_count,
+         0 AS vibe_submit_count,
+         COUNT(*) AS historical_vibe_count,
+         MIN(ve.created_at) AS first_seen_at,
+         MAX(ve.updated_at) AS last_seen_at,
+         COALESCE(MAX(ve.app_version), 'Unknown') AS app_version
+       FROM vibe_events ve
+       LEFT JOIN admin_device_labels dl
+         ON dl.identity_type = 'anonymous_user'
+        AND dl.identity_id = ve.anonymous_user_id
+       WHERE ${activeEventWhere("ve")}
+         AND dl.identity_id IS NULL
+         AND NOT EXISTS (
+           SELECT 1
+           FROM device_identity_links dil
+           JOIN admin_device_labels linked_dl
+             ON linked_dl.identity_type = 'analytics_device'
+            AND linked_dl.identity_id = dil.analytics_device_id
+            AND linked_dl.excluded_from_core_metrics = 1
+           WHERE dil.anonymous_user_id = ve.anonymous_user_id
+         )
+         AND NOT EXISTS (
+           SELECT 1
+           FROM device_identity_links dil
+           WHERE dil.anonymous_user_id = ve.anonymous_user_id
+         )
+       GROUP BY ve.anonymous_user_id
+       ORDER BY MAX(ve.updated_at) DESC
+       LIMIT 10`
+    ).all<AdminRecentDeviceRow>(),
+  ]);
+
+  const active30d = rowNumber(summary?.active_30d);
+  const historicalVibes30d = rowNumber(contentTotals?.vibes_30d);
+  const historicalVibers30d = rowNumber(contentTotals?.anonymous_vibers_30d);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    filters: {
+      includeInternal: options.includeInternal,
+      excludedLabelsActive: !options.includeInternal,
+    },
+    summary: {
+      activeToday: rowNumber(summary?.active_today),
+      active7d: rowNumber(summary?.active_7d),
+      active30d,
+      newDevices30d: rowNumber(newDevices?.new_devices_30d),
+      excludedAnalyticsDevices30d: rowNumber(excludedSummary?.excluded_analytics_devices_30d),
+      excludedHistoricalVibers30d: rowNumber(excludedSummary?.excluded_historical_vibers_30d),
+      excludedHistoricalVibes30d: rowNumber(excludedSummary?.excluded_historical_vibes_30d),
+      events30d: rowNumber(summary?.events_30d),
+      appOpens30d: rowNumber(summary?.app_opens_30d),
+      searches30d: rowNumber(summary?.searches_30d),
+      placeSelections30d: rowNumber(summary?.place_selects_30d),
+      vibeSubmissions30d: historicalVibes30d,
+      trackedVibeSubmissions30d: rowNumber(summary?.vibes_30d),
+      accountEvents30d: rowNumber(summary?.account_events_30d),
+      vibesPerDevice30d: historicalVibers30d > 0 ? Math.round((historicalVibes30d / historicalVibers30d) * 100) / 100 : 0,
+      vibesPerActiveDevice30d: active30d > 0 ? Math.round((historicalVibes30d / active30d) * 100) / 100 : 0,
+      totalVibes: rowNumber(contentTotals?.total_vibes),
+      totalVibedPlaces: rowNumber(contentTotals?.total_vibed_places),
+      totalAnonymousVibers: rowNumber(contentTotals?.total_anonymous_vibers),
+      vibedPlaces30d: rowNumber(contentTotals?.vibed_places_30d),
+      anonymousVibers30d: historicalVibers30d,
+      firstVibeAt: contentTotals?.first_vibe_at ?? null,
+      lastVibeAt: contentTotals?.last_vibe_at ?? null,
+      retention: {
+        day1CohortDevices: day1Retention.cohortDevices,
+        day1RetainedDevices: day1Retention.retainedDevices,
+        day1Rate: day1Retention.rate,
+        day7CohortDevices: day7Retention.cohortDevices,
+        day7RetainedDevices: day7Retention.retainedDevices,
+        day7Rate: day7Retention.rate,
+      },
+    },
+    daily: fillDailyRows(today, 30, dailyResult.results ?? []),
+    vibeHistoryDaily: fillVibeHistoryRows(today, 30, vibeHistoryResult.results ?? []),
+    topEvents: (eventsResult.results ?? []).map((row) => ({ name: row.name ?? "unknown", count: rowNumber(row.count) })),
+    appVersions: (versionsResult.results ?? []).map((row) => ({ name: row.name ?? "Unknown", count: rowNumber(row.count) })),
+    deviceLabels: (labelsResult.results ?? []).map(serializeAdminDeviceLabel),
+    recentDevices: [...(recentAnalyticsDevices.results ?? []), ...(recentAnonymousUsers.results ?? [])].map(serializeAdminRecentDevice),
+  };
+}
+
+async function fetchRetentionMetric(env: Env, days: number, since: string, through: string, options: AdminAnalyticsOptions) {
+  if (through < since) {
+    return { cohortDevices: 0, retainedDevices: 0, rate: null as number | null };
+  }
+
+  const analyticsDevicesFilter = adminAnalyticsDeviceAllowedSQL("d", options);
+  const result = await env.DB.prepare(
+    `SELECT
+       COUNT(*) AS cohort_devices,
+       COALESCE(SUM(CASE WHEN dd.analytics_device_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS retained_devices
+     FROM analytics_devices d
+     LEFT JOIN analytics_device_days dd
+       ON dd.analytics_device_id = d.analytics_device_id
+      AND dd.day = date(d.first_seen_day, ?)
+     WHERE d.first_seen_day BETWEEN ? AND ?
+       AND ${analyticsDevicesFilter}`
+  )
+    .bind(`+${days} day`, since, through)
+    .first<AnalyticsRetentionRow>();
+
+  const cohortDevices = rowNumber(result?.cohort_devices);
+  const retainedDevices = rowNumber(result?.retained_devices);
+  return {
+    cohortDevices,
+    retainedDevices,
+    rate: cohortDevices > 0 ? Math.round((retainedDevices / cohortDevices) * 1000) / 10 : null,
+  };
+}
+
+function serializeAdminDeviceLabel(row: AdminDeviceLabelRow) {
+  return {
+    id: row.id,
+    identityType: row.identity_type,
+    identityId: row.identity_id,
+    label: row.label,
+    category: row.category,
+    excludedFromCoreMetrics: row.excluded_from_core_metrics === 1,
+    notes: row.notes,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    eventCount: rowNumber(row.analytics_event_count),
+    vibeSubmitCount: rowNumber(row.analytics_vibe_submit_count),
+    historicalVibeCount: rowNumber(row.historical_vibe_count),
+    lastSeenAt: row.last_seen_at,
+  };
+}
+
+function serializeAdminRecentDevice(row: AdminRecentDeviceRow) {
+  return {
+    identityType: row.identity_type,
+    identityId: row.identity_id,
+    label: row.label,
+    category: row.category,
+    excludedFromCoreMetrics: row.excluded_from_core_metrics === 1,
+    eventCount: rowNumber(row.event_count),
+    vibeSubmitCount: rowNumber(row.vibe_submit_count),
+    historicalVibeCount: rowNumber(row.historical_vibe_count),
+    firstSeenAt: row.first_seen_at,
+    lastSeenAt: row.last_seen_at,
+    appVersion: row.app_version,
+  };
+}
+
+async function upsertAdminDeviceLabel(request: Request, env: Env): Promise<Response> {
+  const body = await readJson<AdminDeviceLabelInput>(request);
+  if (!body.ok) {
+    return json({ error: body.error }, { status: 400, headers: adminJSONHeaders() });
+  }
+
+  const identityType = normalizeAdminDeviceLabelIdentityType(body.value.identity_type ?? body.value.identityType);
+  if (!identityType) {
+    return json({ error: "identity_type must be analytics_device or anonymous_user." }, { status: 400, headers: adminJSONHeaders() });
+  }
+
+  const identityID = cleanString(body.value.identity_id ?? body.value.identityId);
+  if (!identityID || !isValidAdminDeviceIdentityID(identityType, identityID)) {
+    return json({ error: "identity_id is not valid for that identity_type." }, { status: 400, headers: adminJSONHeaders() });
+  }
+
+  const label = cleanString(body.value.label);
+  if (!label || label.length > 80) {
+    return json({ error: "label is required and must be 80 characters or fewer." }, { status: 400, headers: adminJSONHeaders() });
+  }
+
+  const category = normalizeAdminDeviceLabelCategory(body.value.category) ?? "internal";
+  const excluded = booleanFromUnknown(body.value.excluded_from_core_metrics ?? body.value.excludedFromCoreMetrics, true) ? 1 : 0;
+  const notes = cleanString(body.value.notes)?.slice(0, 240) ?? null;
+  const now = new Date().toISOString();
+  const id = `label_${(await sha256Hex(`admin-device-label:${identityType}:${identityID}`)).slice(0, 32)}`;
+
+  await env.DB.prepare(
+    `INSERT INTO admin_device_labels (
+       id,
+       identity_type,
+       identity_id,
+       label,
+       category,
+       excluded_from_core_metrics,
+       notes,
+       created_at,
+       updated_at
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(identity_type, identity_id) DO UPDATE SET
+       label = excluded.label,
+       category = excluded.category,
+       excluded_from_core_metrics = excluded.excluded_from_core_metrics,
+       notes = excluded.notes,
+       updated_at = excluded.updated_at`
+  )
+    .bind(id, identityType, identityID, label, category, excluded, notes, now, now)
+    .run();
+
+  return json(
+    {
+      label: {
+        id,
+        identityType,
+        identityId: identityID,
+        label,
+        category,
+        excludedFromCoreMetrics: excluded === 1,
+        notes,
+        updatedAt: now,
+      },
+    },
+    { headers: adminJSONHeaders() }
+  );
+}
+
+function normalizeAdminDeviceLabelIdentityType(value: unknown): AdminDeviceLabelIdentityType | null {
+  const normalized = cleanString(value)?.toLowerCase();
+  return (ADMIN_DEVICE_LABEL_IDENTITY_TYPES as readonly string[]).includes(normalized ?? "")
+    ? (normalized as AdminDeviceLabelIdentityType)
+    : null;
+}
+
+function normalizeAdminDeviceLabelCategory(value: unknown): AdminDeviceLabelCategory | null {
+  const normalized = cleanString(value)?.toLowerCase();
+  return (ADMIN_DEVICE_LABEL_CATEGORIES as readonly string[]).includes(normalized ?? "")
+    ? (normalized as AdminDeviceLabelCategory)
+    : null;
+}
+
+function isValidAdminDeviceIdentityID(type: AdminDeviceLabelIdentityType, value: string): boolean {
+  if (value.length > 128 || /[\s"'<>]/.test(value)) {
+    return false;
+  }
+
+  if (type === "analytics_device") {
+    return /^analytics_[a-f0-9]{20,64}$/.test(value);
+  }
+
+  return /^anon_[a-f0-9]{20,64}$/.test(value);
+}
+
+function booleanFromUnknown(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value !== 0;
+  }
+
+  const normalized = cleanString(value)?.toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
+function fillDailyRows(today: string, count: number, rows: AnalyticsDailyRow[]) {
+  const byDay = new Map(rows.map((row) => [row.day, row]));
+  return Array.from({ length: count }, (_, index) => {
+    const day = addDays(today, index - count + 1);
+    const row = byDay.get(day);
+    return {
+      day,
+      activeDevices: rowNumber(row?.active_devices),
+      newDevices: rowNumber(row?.new_devices),
+      events: rowNumber(row?.event_count),
+      appOpens: rowNumber(row?.app_open_count),
+      searches: rowNumber(row?.search_count),
+      placeSelections: rowNumber(row?.place_select_count),
+      vibeSubmissions: rowNumber(row?.vibe_submit_count),
+      accountEvents: rowNumber(row?.account_event_count),
+    };
+  });
+}
+
+function fillVibeHistoryRows(today: string, count: number, rows: VibeHistoryDailyRow[]) {
+  const byDay = new Map(rows.map((row) => [row.day, row]));
+  return Array.from({ length: count }, (_, index) => {
+    const day = addDays(today, index - count + 1);
+    const row = byDay.get(day);
+    return {
+      day,
+      vibeSubmissions: rowNumber(row?.vibe_submissions),
+      uniqueVibers: rowNumber(row?.unique_vibers),
+      vibedPlaces: rowNumber(row?.vibed_places),
+    };
+  });
+}
+
+function rowNumber(value: number | null | undefined): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function dayString(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function addDays(day: string, offset: number): string {
+  const date = new Date(`${day}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + offset);
+  return dayString(date);
+}
+
 async function getVibeTags(env: Env): Promise<Response> {
   const tags = await fetchActiveVibeTags(env);
   return json({ tags }, { headers: publicCacheHeaders(CACHE_TTL_SECONDS.vibeTaxonomy) });
+}
+
+async function collectAnalyticsEvent(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const body = await readJson<AnalyticsEventInput>(request);
+  if (!body.ok) {
+    return json({ error: body.error }, { status: 400 });
+  }
+
+  const eventName = normalizeAnalyticsEventName(body.value.event_name ?? body.value.eventName);
+  if (!eventName) {
+    return json({ error: "event_name is not supported." }, { status: 400 });
+  }
+
+  const deviceIDHash = (await deviceHashFromRequest(request)) ?? (await deviceHashFromBody(body.value));
+  if (!deviceIDHash) {
+    return json({ status: "ignored", reason: "missing_device_id" }, { status: 202 });
+  }
+
+  const appVersion =
+    cleanString(body.value.app_version ?? body.value.appVersion) ?? cleanString(request.headers.get("X-Vibe-App-Version"));
+  const platform = cleanString(body.value.platform) ?? sourceFromRequest(request);
+  const properties = sanitizeAnalyticsProperties(body.value.properties);
+
+  ctx.waitUntil(
+    recordAnalyticsEvent(env, {
+      eventName,
+      deviceIDHash,
+      platform,
+      appVersion,
+      properties,
+    })
+  );
+
+  return json({ status: "queued" }, { status: 202 });
+}
+
+async function recordAnalyticsEvent(env: Env, record: AnalyticsRecord): Promise<boolean> {
+  const analyticsDeviceID = await analyticsDeviceIDForDeviceHash(env, record.deviceIDHash);
+  if (!analyticsDeviceID) {
+    return false;
+  }
+
+  const createdAt = record.createdAt ?? new Date().toISOString();
+  const day = createdAt.slice(0, 10);
+  const counters = analyticsCounters(record.eventName);
+  const safePlatform = cleanString(record.platform) ?? "ios";
+  const safeAppVersion = cleanString(record.appVersion);
+  const propertiesJSON = JSON.stringify(record.properties);
+
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO analytics_devices (
+           analytics_device_id,
+           first_seen_at,
+           first_seen_day,
+           last_seen_at,
+           last_seen_day,
+           platform,
+           app_version,
+           event_count,
+           app_open_count,
+           search_count,
+           place_select_count,
+           vibe_submit_count,
+           account_event_count
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+         ON CONFLICT(analytics_device_id) DO UPDATE SET
+           last_seen_at = excluded.last_seen_at,
+           last_seen_day = excluded.last_seen_day,
+           platform = excluded.platform,
+           app_version = COALESCE(excluded.app_version, analytics_devices.app_version),
+           event_count = analytics_devices.event_count + 1,
+           app_open_count = analytics_devices.app_open_count + excluded.app_open_count,
+           search_count = analytics_devices.search_count + excluded.search_count,
+           place_select_count = analytics_devices.place_select_count + excluded.place_select_count,
+           vibe_submit_count = analytics_devices.vibe_submit_count + excluded.vibe_submit_count,
+           account_event_count = analytics_devices.account_event_count + excluded.account_event_count`
+      ).bind(
+        analyticsDeviceID,
+        createdAt,
+        day,
+        createdAt,
+        day,
+        safePlatform,
+        safeAppVersion,
+        counters.appOpen,
+        counters.search,
+        counters.placeSelect,
+        counters.vibeSubmit,
+        counters.accountEvent
+      ),
+      env.DB.prepare(
+        `INSERT INTO analytics_device_days (
+           day,
+           analytics_device_id,
+           first_seen_at,
+           last_seen_at,
+           platform,
+           app_version,
+           event_count,
+           app_open_count,
+           search_count,
+           place_select_count,
+           vibe_submit_count,
+           account_event_count
+         )
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+         ON CONFLICT(day, analytics_device_id) DO UPDATE SET
+           last_seen_at = excluded.last_seen_at,
+           platform = excluded.platform,
+           app_version = COALESCE(excluded.app_version, analytics_device_days.app_version),
+           event_count = analytics_device_days.event_count + 1,
+           app_open_count = analytics_device_days.app_open_count + excluded.app_open_count,
+           search_count = analytics_device_days.search_count + excluded.search_count,
+           place_select_count = analytics_device_days.place_select_count + excluded.place_select_count,
+           vibe_submit_count = analytics_device_days.vibe_submit_count + excluded.vibe_submit_count,
+           account_event_count = analytics_device_days.account_event_count + excluded.account_event_count`
+      ).bind(
+        day,
+        analyticsDeviceID,
+        createdAt,
+        createdAt,
+        safePlatform,
+        safeAppVersion,
+        counters.appOpen,
+        counters.search,
+        counters.placeSelect,
+        counters.vibeSubmit,
+        counters.accountEvent
+      ),
+      env.DB.prepare(
+        `INSERT INTO analytics_events (
+           id,
+           created_at,
+           day,
+           analytics_device_id,
+           event_name,
+           platform,
+           app_version,
+           properties_json
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(crypto.randomUUID(), createdAt, day, analyticsDeviceID, record.eventName, safePlatform, safeAppVersion, propertiesJSON),
+    ]);
+    return true;
+  } catch (error) {
+    console.log(JSON.stringify({ message: "Analytics event write failed.", event: record.eventName, error: String(error) }));
+    return false;
+  }
+}
+
+async function analyticsDeviceIDForDeviceHash(env: Env, deviceIDHash: string): Promise<string | null> {
+  const secret = cleanString((env as RuntimeEnv).ANALYTICS_SECRET);
+  if (!secret) {
+    return null;
+  }
+
+  return `analytics_${(await sha256Hex(`vibes-yall-analytics:${secret}:${deviceIDHash}`)).slice(0, 40)}`;
+}
+
+async function linkAnalyticsDeviceToAnonymousUser(
+  env: Env,
+  deviceIDHash: string,
+  anonymousUserID: string,
+  seenAt: string,
+  linkSource: "vibe_submission" | "analytics_backfill" | "manual"
+): Promise<void> {
+  const analyticsDeviceID = await analyticsDeviceIDForDeviceHash(env, deviceIDHash);
+  if (!analyticsDeviceID) {
+    return;
+  }
+
+  try {
+    await env.DB.prepare(
+      `INSERT INTO device_identity_links (
+         analytics_device_id,
+         anonymous_user_id,
+         link_source,
+         confidence,
+         event_count,
+         first_seen_at,
+         last_seen_at
+       ) VALUES (?, ?, ?, 1.0, 1, ?, ?)
+       ON CONFLICT(analytics_device_id, anonymous_user_id) DO UPDATE SET
+         link_source = excluded.link_source,
+         confidence = MAX(device_identity_links.confidence, excluded.confidence),
+         event_count = device_identity_links.event_count + 1,
+         first_seen_at = MIN(device_identity_links.first_seen_at, excluded.first_seen_at),
+         last_seen_at = MAX(device_identity_links.last_seen_at, excluded.last_seen_at)`
+    )
+      .bind(analyticsDeviceID, anonymousUserID, linkSource, seenAt, seenAt)
+      .run();
+  } catch (error) {
+    console.log(JSON.stringify({ message: "Device identity link write failed.", error: String(error) }));
+  }
+}
+
+function analyticsCounters(eventName: AnalyticsEventName): AnalyticsCounters {
+  return {
+    appOpen: eventName === "app_open" ? 1 : 0,
+    search: eventName === "search_performed" ? 1 : 0,
+    placeSelect: eventName === "place_selected" ? 1 : 0,
+    vibeSubmit: eventName === "vibe_submitted" ? 1 : 0,
+    accountEvent: eventName.startsWith("account_") ? 1 : 0,
+  };
+}
+
+function normalizeAnalyticsEventName(value: unknown): AnalyticsEventName | null {
+  const normalized = cleanString(value)
+    ?.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  if (!normalized) {
+    return null;
+  }
+
+  return (ANALYTICS_EVENT_NAMES as readonly string[]).includes(normalized) ? (normalized as AnalyticsEventName) : null;
+}
+
+function sanitizeAnalyticsProperties(value: unknown, extras: Record<string, string | number | boolean | null | undefined> = {}): Record<string, string> {
+  const output: Record<string, string> = {};
+  const append = (rawKey: string, rawValue: unknown) => {
+    if (Object.keys(output).length >= MAX_ANALYTICS_PROPERTIES) {
+      return;
+    }
+
+    const key = rawKey
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, MAX_ANALYTICS_PROPERTY_KEY_LENGTH);
+
+    if (!key) {
+      return;
+    }
+
+    let stringValue: string | null = null;
+    if (typeof rawValue === "string") {
+      stringValue = rawValue;
+    } else if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+      stringValue = String(rawValue);
+    } else if (typeof rawValue === "boolean") {
+      stringValue = rawValue ? "true" : "false";
+    }
+
+    const cleanedValue = cleanString(stringValue);
+    if (!cleanedValue) {
+      return;
+    }
+
+    output[key] = cleanedValue.slice(0, MAX_ANALYTICS_PROPERTY_VALUE_LENGTH);
+  };
+
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    for (const [key, rawValue] of Object.entries(value as Record<string, unknown>)) {
+      append(key, rawValue);
+    }
+  }
+
+  for (const [key, rawValue] of Object.entries(extras)) {
+    append(key, rawValue);
+  }
+
+  return output;
 }
 
 async function getAccountEligibility(request: Request, env: Env): Promise<Response> {
@@ -489,7 +2342,9 @@ async function getAccountEligibility(request: Request, env: Env): Promise<Respon
 
   const anonymousUserID = anonymousUserIDForDeviceHash(deviceIDHash);
   const sessionProfile = await fetchProfileForSession(request, env);
-  return json({ account: await buildAccountEligibility(env, deviceIDHash, anonymousUserID, sessionProfile) });
+  return json({
+    account: await buildAccountEligibility(env, deviceIDHash, anonymousUserID, sessionProfile),
+  });
 }
 
 async function requestAccountSignup(request: Request, env: Env): Promise<Response> {
@@ -524,36 +2379,125 @@ async function requestAccountSignup(request: Request, env: Env): Promise<Respons
   }
 
   const profile = await upsertProfileForEmailAndDevice(env, email, deviceIDHash, anonymousUserID, now);
-  const rawToken = await randomToken();
-  const tokenHash = await sha256Hex(`vibes-yall-email-token:${rawToken}`);
-  const tokenID = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + EMAIL_CONFIRMATION_TTL_MS).toISOString();
   const redirectURL = cleanString(body.value.redirect_url ?? body.value.redirectUrl);
+  const token = await createAccountEmailToken(env, profile.id, "email_confirmation", redirectURL, now);
+  const confirmationURL = confirmationURLForToken(request, env, token.rawToken);
+  const emailSent = await sendAccountEmail(env, email, confirmationURL, "email_confirmation");
+  let responseProfile = profile;
+  let sessionToken: string | null = null;
+  let appURL: string | null = null;
+  let autoConfirmed = false;
 
-  await env.DB.prepare(
-    `INSERT INTO email_confirmation_tokens (id, profile_id, token_hash, purpose, redirect_url, expires_at, created_at)
-     VALUES (?, ?, ?, 'email_confirmation', ?, ?, ?)`
-  )
-    .bind(tokenID, profile.id, tokenHash, redirectURL, expiresAt, now)
-    .run();
+  if (!emailSent && shouldAutoConfirmWhenEmailUnavailable(env)) {
+    sessionToken = await createProfileSession(env, profile.id, now);
+    await env.DB.batch([
+      env.DB.prepare("UPDATE email_confirmation_tokens SET consumed_at = ? WHERE id = ?").bind(now, token.id),
+      env.DB.prepare(
+        `UPDATE profiles
+         SET email_verified_at = COALESCE(email_verified_at, ?),
+             updated_at = ?,
+             last_seen_at = ?
+         WHERE id = ?`
+      ).bind(now, now, now, profile.id),
+    ]);
 
-  const confirmationURL = confirmationURLForToken(request, env, rawToken);
-  const emailSent = await sendAccountConfirmationEmail(env, email, confirmationURL);
+    responseProfile =
+      (await env.DB.prepare("SELECT * FROM profiles WHERE id = ?").bind(profile.id).first<ProfileRow>()) ?? profile;
+    appURL = deepLinkURLForAccount(env, sessionToken, redirectURL);
+    autoConfirmed = true;
+  }
 
   return json(
     {
-      status: "confirmation_sent",
-      email_sent: emailSent,
+      status: autoConfirmed ? "confirmed" : "confirmation_sent",
+      email_sent: emailSent || autoConfirmed,
+      app_url: appURL,
+      session_token: sessionToken,
       account: {
         ...eligibility,
-        profile: serializeProfile(profile),
+        profile: serializeProfile(responseProfile),
       },
-      message: emailSent
-        ? "Check your email to confirm your VIBES Y'ALL account."
-        : "Confirmation token created. Configure Cloudflare email sending to deliver it automatically.",
+      message: autoConfirmed
+        ? "Your VIBES Y'ALL account is saved on this device."
+        : emailSent
+          ? "Check your email to confirm your VIBES Y'ALL account."
+          : "We could not send that email right now. Try again in a minute.",
     },
-    { status: 202 }
+    { status: autoConfirmed ? 200 : emailSent ? 202 : 503 }
   );
+}
+
+async function requestAccountRecovery(request: Request, env: Env): Promise<Response> {
+  const body = await readJson<AccountRecoveryInput>(request);
+  if (!body.ok) {
+    return json({ error: body.error }, { status: 400 });
+  }
+
+  const email = normalizeEmail(body.value.email);
+  if (!email) {
+    return json({ error: "A valid email address is required." }, { status: 400 });
+  }
+
+  const genericResponse = {
+    status: "recovery_sent",
+    email_sent: true,
+    message: "If that email has a VIBES Y'ALL account, a sign-in link is on the way.",
+  };
+
+  const profile = await env.DB.prepare("SELECT * FROM profiles WHERE email_normalized = ? LIMIT 1")
+    .bind(email)
+    .first<ProfileRow>();
+
+  if (!profile) {
+    return json(genericResponse, { status: 202 });
+  }
+
+  const now = new Date().toISOString();
+  const redirectURL = cleanString(body.value.redirect_url ?? body.value.redirectUrl);
+  const token = await createAccountEmailToken(env, profile.id, "login", redirectURL, now);
+  const loginURL = confirmationURLForToken(request, env, token.rawToken);
+  const emailSent = await sendAccountEmail(env, email, loginURL, "login");
+
+  if (!emailSent) {
+    return json(
+      {
+        status: "email_delivery_failed",
+        email_sent: false,
+        message: "We could not send that email right now. Try again in a minute.",
+      },
+      { status: 503 }
+    );
+  }
+
+  return json(genericResponse, { status: 202 });
+}
+
+async function requestAccountLogout(request: Request, env: Env): Promise<Response> {
+  const tokenHash = await profileSessionTokenHashFromRequest(request);
+  if (!tokenHash) {
+    return json({
+      status: "logged_out",
+      revoked: false,
+      message: "You are logged out on this device.",
+    });
+  }
+
+  const now = new Date().toISOString();
+  const result = await env.DB.prepare(
+    `UPDATE profile_sessions
+     SET revoked_at = COALESCE(revoked_at, ?),
+         last_seen_at = ?
+     WHERE token_hash = ?
+       AND revoked_at IS NULL`
+  )
+    .bind(now, now, tokenHash)
+    .run();
+
+  return json({
+    status: "logged_out",
+    revoked: Number(result.meta.changes ?? 0) > 0,
+    message: "You are logged out on this device.",
+  });
 }
 
 async function requestAccountDeletion(request: Request, env: Env): Promise<Response> {
@@ -598,6 +2542,28 @@ async function requestAccountDeletion(request: Request, env: Env): Promise<Respo
   });
 }
 
+async function createAccountEmailToken(
+  env: Env,
+  profileID: string,
+  purpose: AccountEmailPurpose,
+  redirectURL: string | null | undefined,
+  now: string
+): Promise<{ id: string; rawToken: string }> {
+  const rawToken = await randomToken();
+  const tokenHash = await sha256Hex(`vibes-yall-email-token:${rawToken}`);
+  const id = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + EMAIL_CONFIRMATION_TTL_MS).toISOString();
+
+  await env.DB.prepare(
+    `INSERT INTO email_confirmation_tokens (id, profile_id, token_hash, purpose, redirect_url, expires_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(id, profileID, tokenHash, purpose, redirectURL ?? null, expiresAt, now)
+    .run();
+
+  return { id, rawToken };
+}
+
 async function confirmAccountEmail(url: URL, env: Env): Promise<Response> {
   const token = cleanString(url.searchParams.get("token"));
   if (!token) {
@@ -610,6 +2576,7 @@ async function confirmAccountEmail(url: URL, env: Env): Promise<Response> {
        ect.id,
        ect.profile_id,
        ect.token_hash,
+       ect.purpose,
        ect.redirect_url,
        ect.expires_at,
        ect.consumed_at,
@@ -651,7 +2618,8 @@ async function confirmAccountEmail(url: URL, env: Env): Promise<Response> {
   ]);
 
   const appURL = deepLinkURLForAccount(env, rawSessionToken, row.redirect_url);
-  return accountResultPage("Your account is confirmed.", true, env, appURL);
+  const message = row.purpose === "login" ? "You are signed in." : "Your account is confirmed.";
+  return accountResultPage(message, true, env, appURL);
 }
 
 async function appReviewLogin(request: Request, env: Env): Promise<Response> {
@@ -689,7 +2657,12 @@ async function appReviewLogin(request: Request, env: Env): Promise<Response> {
   return accountResultPage("App Review account ready.", true, env, appURL);
 }
 
-async function buildAccountEligibility(env: Env, deviceIDHash: string, anonymousUserID: string, sessionProfile?: ProfileRow | null) {
+async function buildAccountEligibility(
+  env: Env,
+  deviceIDHash: string,
+  anonymousUserID: string,
+  sessionProfile?: ProfileRow | null
+) {
   const threshold = accountSignupThreshold(env);
   const anonymousUserIDs = await anonymousUserIDsForPrimary(env, anonymousUserID);
   const vibedPlaceCount = await countVibedPlacesForAnonymousUsers(env, anonymousUserIDs);
@@ -707,6 +2680,7 @@ async function buildAccountEligibility(env: Env, deviceIDHash: string, anonymous
       "Help keep the map authentic and harder to spam.",
     ],
     profile: profile ? serializeProfile(profile) : null,
+    session_token: null,
   };
 }
 
@@ -741,17 +2715,11 @@ async function fetchProfileForDeviceHash(env: Env, deviceIDHash: string): Promis
 }
 
 async function fetchProfileForSession(request: Request, env: Env): Promise<ProfileRow | null> {
-  const authorization = cleanString(request.headers.get("Authorization"));
-  if (!authorization?.toLowerCase().startsWith("bearer ")) {
+  const tokenHash = await profileSessionTokenHashFromRequest(request);
+  if (!tokenHash) {
     return null;
   }
 
-  const sessionToken = cleanString(authorization.slice("bearer ".length));
-  if (!sessionToken) {
-    return null;
-  }
-
-  const tokenHash = await sha256Hex(`vibes-yall-profile-session:${sessionToken}`);
   const now = new Date().toISOString();
   const profile = await env.DB.prepare(
     `SELECT
@@ -777,6 +2745,20 @@ async function fetchProfileForSession(request: Request, env: Env): Promise<Profi
   ]);
 
   return profile;
+}
+
+async function profileSessionTokenHashFromRequest(request: Request): Promise<string | null> {
+  const authorization = cleanString(request.headers.get("Authorization"));
+  if (!authorization?.toLowerCase().startsWith("bearer ")) {
+    return null;
+  }
+
+  const sessionToken = cleanString(authorization.slice("bearer ".length));
+  if (!sessionToken) {
+    return null;
+  }
+
+  return sha256Hex(`vibes-yall-profile-session:${sessionToken}`);
 }
 
 async function createProfileSession(env: Env, profileID: string, now: string): Promise<string> {
@@ -859,6 +2841,10 @@ function accountSignupThreshold(env: Env): number {
   return Number.isFinite(configured) && configured > 0 ? configured : ACCOUNT_SIGNUP_THRESHOLD_DEFAULT;
 }
 
+function shouldAutoConfirmWhenEmailUnavailable(env: Env): boolean {
+  return cleanString((env as RuntimeEnv).ACCOUNT_AUTO_CONFIRM_IF_EMAIL_UNAVAILABLE)?.toLowerCase() === "true";
+}
+
 function confirmationURLForToken(request: Request, env: Env, token: string): string {
   const runtimeEnv = env as RuntimeEnv;
   const baseURL = cleanString(runtimeEnv.APP_BASE_URL) ?? originForRequest(request);
@@ -886,33 +2872,52 @@ function deepLinkURLForAccount(env: Env, sessionToken: string, redirectURL?: str
   return `${scheme}://account/confirmed?session=${encodeURIComponent(sessionToken)}`;
 }
 
-async function sendAccountConfirmationEmail(env: Env, email: string, confirmationURL: string): Promise<boolean> {
+async function sendAccountEmail(env: Env, email: string, actionURL: string, purpose: AccountEmailPurpose): Promise<boolean> {
   const runtimeEnv = env as RuntimeEnv;
   const sender = runtimeEnv.SIGNUP_EMAIL;
-  const from = cleanString(runtimeEnv.ACCOUNT_EMAIL_FROM) ?? SUPPORT_EMAIL;
+  const configuredFrom = cleanString(runtimeEnv.ACCOUNT_EMAIL_FROM);
+  const from =
+    configuredFrom && configuredFrom.toLowerCase().endsWith("@vibesyall.com")
+      ? configuredFrom
+      : ACCOUNT_CONFIRMATION_FROM_EMAIL;
 
   if (!sender) {
-    console.log(JSON.stringify({ message: "Account email sender is not configured.", email, confirmation_url: confirmationURL }));
+    console.log(JSON.stringify({ message: "Account email sender is not configured." }));
     return false;
   }
 
-  await sender.send({
-    from,
-    to: email,
-    subject: "Confirm your VIBES Y'ALL account",
-    text: [
-      "Confirm your VIBES Y'ALL account:",
-      confirmationURL,
-      "",
-      "This keeps your past and future vibes tied to you when you switch devices.",
-    ].join("\n"),
-    html: `
-      <p>Confirm your <strong>VIBES Y'ALL</strong> account:</p>
-      <p><a href="${escapeHTML(confirmationURL)}">Confirm account</a></p>
-      <p>This keeps your past and future vibes tied to you when you switch devices.</p>
-    `,
-  });
-  return true;
+  const isLogin = purpose === "login";
+  const subject = isLogin ? "Sign in to VIBES Y'ALL" : "Confirm your VIBES Y'ALL account";
+  const intro = isLogin ? "Use this link to sign in to VIBES Y'ALL:" : "Confirm your VIBES Y'ALL account:";
+  const cta = isLogin ? "Sign in" : "Confirm account";
+  const detail = isLogin
+    ? "This link lets you get back to your saved vibes and edit your past picks."
+    : "This keeps your past and future vibes tied to you when you switch devices.";
+
+  try {
+    await sender.send({
+      from: { email: from, name: "VIBES Y'ALL" },
+      replyTo: SUPPORT_EMAIL,
+      to: email,
+      subject,
+      text: [
+        intro,
+        actionURL,
+        "",
+        detail,
+      ].join("\n"),
+      html: `
+        <p>${escapeHTML(intro)}</p>
+        <p><a href="${escapeHTML(actionURL)}">${escapeHTML(cta)}</a></p>
+        <p>${escapeHTML(detail)}</p>
+      `,
+    });
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(JSON.stringify({ message: "Account email send failed.", purpose, error: message }));
+    return false;
+  }
 }
 
 async function randomToken(): Promise<string> {
@@ -921,15 +2926,20 @@ async function randomToken(): Promise<string> {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+function faviconLinks(): string {
+  return `<link rel="icon" type="image/png" sizes="32x32" href="${escapeHTML(LANDING_ASSETS.favicon32)}">
+  <link rel="apple-touch-icon" href="${escapeHTML(LANDING_ASSETS.appleTouchIcon)}">`;
+}
+
 function landingPage(request: Request, env: Env): Response {
-  const appStoreURL = cleanString((env as RuntimeEnv).APP_STORE_URL) ?? "https://apps.apple.com/";
+  const appStoreURL = cleanString((env as RuntimeEnv).APP_STORE_URL) ?? LIVE_APP_STORE_URL;
   const privacyURL = new URL("/privacy", request.url).toString();
   const termsURL = new URL("/terms", request.url).toString();
   const supportURL = new URL("/support", request.url).toString();
   const screenshots = LANDING_ASSETS.screenshots
     .filter((screenshot) => {
       const alt = screenshot.alt.toLowerCase();
-      return alt.includes("selected vibes") || alt.includes("clustered vibe map");
+      return alt.includes("selected vibes") || alt.includes("vibe picker") || alt.includes("clustered vibe map");
     })
     .map(
       (screenshot, index) => `
@@ -951,6 +2961,7 @@ function landingPage(request: Request, env: Env): Response {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>VIBES Y'ALL</title>
   <meta name="description" content="Find places by how they feel, not by star ratings.">
+  ${faviconLinks()}
   <style>${landingCSS()}</style>
 </head>
 <body>
@@ -961,14 +2972,15 @@ function landingPage(request: Request, env: Env): Response {
       <h1>Find places by the vibe.</h1>
       <p class="lede">No stars, no comments, no noise. Tap a real place, pick up to three vibes, and see what everyone else felt.</p>
       <div class="actions">
-        <a class="button primary" href="${escapeHTML(appStoreURL)}">Download on the App Store</a>
-        <a class="button ghost" href="${escapeHTML(privacyURL)}">Privacy</a>
+        <a class="app-store-badge" href="${escapeHTML(appStoreURL)}" aria-label="Download on the App Store">
+          <img src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg" alt="Download on the App Store">
+        </a>
       </div>
     </section>
     ${screenshotsSection}
   </main>
   <section class="features">
-    <article><strong>Structured vibes</strong><span>Clean human labels instead of messy written reviews.</span></article>
+    <article><strong>Easier to understand than 4.1 stars</strong><span>Clean human labels instead of messy written reviews.</span></article>
     <article><strong>Anonymous first</strong><span>Start contributing without an account.</span></article>
     <article><strong>Account optional</strong><span>After 10 places, save your history across devices.</span></article>
   </section>
@@ -989,6 +3001,7 @@ function privacyPage(_request: Request, _env: Env): Response {
       "VIBES Y'ALL is built around lightweight, structured place sentiment. In V1, we do not collect comments, photos, public profiles, phone numbers, or star ratings.",
       "You can use the app anonymously. Anonymous activity is tied to a hashed device identifier so one device can update its own vibe for a place without creating duplicate votes.",
       "If you choose to create an account after contributing enough places, we collect your email address to confirm the account and let you keep your vibe history if you switch devices.",
+      "We collect first-party anonymous product analytics, such as app opens, search result counts, place selections, and vibe submission counts. We do not store raw search text, use advertising identifiers, sell analytics data, or track you across other apps or websites.",
       "Public app responses show aggregate place vibe data. Raw vibe events, anonymous user ids, device hashes, and email addresses are not public.",
       "Optional accounts can be deleted from the in-app menu, or by contacting support if you need help.",
       `Contact: ${SUPPORT_EMAIL}`,
@@ -1019,6 +3032,7 @@ function supportPage(_request: Request, _env: Env): Response {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Support | VIBES Y'ALL</title>
+  ${faviconLinks()}
   <style>${landingCSS()}</style>
 </head>
 <body>
@@ -1043,6 +3057,7 @@ function documentPage(title: string, paragraphs: string[], updated: string): Res
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHTML(title)} | VIBES Y'ALL</title>
+  ${faviconLinks()}
   <style>${landingCSS()}</style>
 </head>
 <body>
@@ -1057,13 +3072,14 @@ function documentPage(title: string, paragraphs: string[], updated: string): Res
 }
 
 function accountResultPage(message: string, success: boolean, env: Env, appURL?: string): Response {
-  const appStoreURL = cleanString((env as RuntimeEnv).APP_STORE_URL) ?? "https://apps.apple.com/";
+  const appStoreURL = cleanString((env as RuntimeEnv).APP_STORE_URL) ?? LIVE_APP_STORE_URL;
   return html(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${success ? "Account confirmed" : "Account link issue"} | VIBES Y'ALL</title>
+  ${faviconLinks()}
   <style>${landingCSS()}</style>
 </head>
 <body>
@@ -1088,6 +3104,7 @@ function appReviewLoginPage(env: Env, error?: string, status = 200): Response {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>App Review Login | VIBES Y'ALL</title>
+  ${faviconLinks()}
   <style>${landingCSS()}
     .review-form {
       display: grid;
@@ -1257,6 +3274,17 @@ function landingCSS(): string {
     }
     .primary { background: var(--navy); color: white; }
     .ghost { background: rgba(255, 255, 255, 0.74); color: var(--navy); }
+    .app-store-badge {
+      display: inline-flex;
+      align-items: center;
+      width: 12.5rem;
+      line-height: 0;
+    }
+    .app-store-badge img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
     .showcase {
       position: relative;
       min-height: clamp(32rem, 54vw, 48rem);
@@ -1617,7 +3645,8 @@ async function getPlaceMapCells(url: URL, env: Env): Promise<Response> {
   const cells = aggregateMapCells(
     (result.results ?? []).filter((row) => distanceMeters(latitude, longitude, row.latitude, row.longitude) <= radius),
     cellSize
-  ).slice(0, MAX_MAP_CELL_RESPONSE_CELLS);
+  )
+    .slice(0, MAX_MAP_CELL_RESPONSE_CELLS);
 
   return json(
     {
@@ -1695,6 +3724,8 @@ async function upsertPlace(request: Request, env: Env): Promise<Response> {
     .bind(id, provider, providerPlaceID, name, latitude, longitude, streetAddress, city, region, country, category, now, now)
     .run();
 
+  await upsertPlaceExternalID(env, id, provider, providerPlaceID, now, "app_submission", 1.0);
+
   const place = await fetchPlaceByID(env, id);
   if (!place) {
     return json({ error: "Place could not be saved." }, { status: 500 });
@@ -1703,7 +3734,59 @@ async function upsertPlace(request: Request, env: Env): Promise<Response> {
   return json({ place: await serializePlace(place, undefined, env) }, { status: 201 });
 }
 
-async function upsertVibe(request: Request, env: Env): Promise<Response> {
+async function upsertPlaceExternalID(
+  env: Env,
+  placeID: string,
+  provider: string,
+  providerPlaceID: string | null,
+  seenAt: string,
+  source: string,
+  confidence: number
+): Promise<void> {
+  if (!providerPlaceID) {
+    return;
+  }
+
+  await env.DB.prepare(
+    `INSERT INTO place_external_ids (
+       place_id,
+       provider,
+       provider_place_id,
+       source,
+       confidence,
+       first_seen_at,
+       last_seen_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(provider, provider_place_id) DO UPDATE SET
+       place_id = excluded.place_id,
+       source = COALESCE(place_external_ids.source, excluded.source),
+       confidence = MAX(place_external_ids.confidence, excluded.confidence),
+       first_seen_at = MIN(place_external_ids.first_seen_at, excluded.first_seen_at),
+       last_seen_at = MAX(place_external_ids.last_seen_at, excluded.last_seen_at)`
+  )
+    .bind(placeID, provider, providerPlaceID, source, confidence, seenAt, seenAt)
+    .run();
+}
+
+function placeSnapshotForVibe(place: PlaceRow): string {
+  return JSON.stringify({
+    version: PLACE_SNAPSHOT_VERSION,
+    place_id: place.id,
+    provider: place.provider,
+    provider_place_id: place.provider_place_id,
+    name: place.name,
+    latitude: place.latitude,
+    longitude: place.longitude,
+    street_address: place.street_address,
+    city: place.city,
+    region: place.region,
+    country: place.country,
+    category: place.category,
+    captured_at: new Date().toISOString(),
+  });
+}
+
+async function upsertVibe(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   const body = await readJson<VibeInput>(request);
   if (!body.ok) {
     return json({ error: body.error }, { status: 400 });
@@ -1714,8 +3797,8 @@ async function upsertVibe(request: Request, env: Env): Promise<Response> {
     return json({ error: "place_id is required." }, { status: 400 });
   }
 
-  const placeExists = await env.DB.prepare("SELECT id FROM places WHERE id = ?").bind(placeID).first<{ id: string }>();
-  if (!placeExists) {
+  const placeForSubmission = await fetchPlaceByID(env, placeID);
+  if (!placeForSubmission) {
     return json({ error: "Place not found." }, { status: 404 });
   }
 
@@ -1756,27 +3839,47 @@ async function upsertVibe(request: Request, env: Env): Promise<Response> {
   const eventID = existing?.id ?? crypto.randomUUID();
   const source = cleanString(body.value.source) ?? sourceFromRequest(request);
   const appVersion = cleanString(body.value.app_version ?? body.value.appVersion) ?? cleanString(request.headers.get("X-Vibe-App-Version"));
+  const submissionContext = cleanString(body.value.submission_context ?? body.value.submissionContext) ?? source;
+  const placeSnapshotJSON = placeSnapshotForVibe(placeForSubmission);
 
   await env.DB.prepare(
     `INSERT INTO vibe_events (
        id, place_id, anonymous_user_id, primary_vibe_tag_id, secondary_vibe_tag_id, third_vibe_tag_id, source, app_version,
-       created_at, updated_at, is_flagged, is_deleted, moderation_status
+       taxonomy_version_id, submission_context, place_snapshot_json, created_at, updated_at, is_flagged, is_deleted, moderation_status
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'active')
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'active')
      ON CONFLICT(place_id, anonymous_user_id) DO UPDATE SET
        primary_vibe_tag_id = excluded.primary_vibe_tag_id,
        secondary_vibe_tag_id = excluded.secondary_vibe_tag_id,
        third_vibe_tag_id = excluded.third_vibe_tag_id,
        source = excluded.source,
        app_version = excluded.app_version,
+       taxonomy_version_id = excluded.taxonomy_version_id,
+       submission_context = excluded.submission_context,
+       place_snapshot_json = excluded.place_snapshot_json,
        updated_at = excluded.updated_at,
        is_deleted = 0,
        moderation_status = 'active'`
   )
-    .bind(eventID, placeID, eventAnonymousUserID, primaryTagID, secondaryTagID, thirdTagID, source, appVersion, existing?.created_at ?? now, now)
+    .bind(
+      eventID,
+      placeID,
+      eventAnonymousUserID,
+      primaryTagID,
+      secondaryTagID,
+      thirdTagID,
+      source,
+      appVersion,
+      CURRENT_TAXONOMY_VERSION_ID,
+      submissionContext,
+      placeSnapshotJSON,
+      existing?.created_at ?? now,
+      now
+    )
     .run();
 
   await refreshPlaceVibeStats(env, placeID, now);
+  await refreshPlaceVibeTagStats(env, placeID, now);
   await mirrorLegacyRating(env, eventID, placeID, deviceIDHash, primaryTagID, secondaryTagID, thirdTagID, existing?.created_at ?? now, now);
 
   if (wasFirstVibe) {
@@ -1786,6 +3889,33 @@ async function upsertVibe(request: Request, env: Env): Promise<Response> {
     )
       .bind(crypto.randomUUID(), placeID, eventID, "first_to_vibe", now)
       .run();
+  }
+
+  if (deviceIDHash) {
+    const analyticsWrite = recordAnalyticsEvent(env, {
+      eventName: "vibe_submitted",
+      deviceIDHash,
+      platform: source,
+      appVersion,
+      createdAt: now,
+      properties: sanitizeAnalyticsProperties(null, {
+        place_id: placeID,
+        primary_vibe_tag_id: primaryTagID,
+        secondary_vibe_tag_id: secondaryTagID,
+        third_vibe_tag_id: thirdTagID,
+        vibe_tag_count: parsedTags.tagIDs.length,
+        update_type: existing ? "updated" : "created",
+        was_first_vibe: wasFirstVibe,
+      }),
+    }).then(async () => {
+      await linkAnalyticsDeviceToAnonymousUser(env, deviceIDHash, eventAnonymousUserID, now, "vibe_submission");
+    });
+
+    if (ctx) {
+      ctx.waitUntil(analyticsWrite);
+    } else {
+      await analyticsWrite;
+    }
   }
 
   const place = await fetchPlaceByID(env, placeID);
@@ -2119,7 +4249,20 @@ function mapCellPoint(latitude: number, longitude: number, cellSizeMeters: numbe
 }
 
 function recommendedMapCellSize(radiusMeters: number): number {
-  return Math.min(Math.max(Math.round(radiusMeters / 10_000) * 1_000, MIN_MAP_CELL_SIZE_METERS), MAX_MAP_CELL_SIZE_METERS);
+  let cellSize = 220_000;
+  if (radiusMeters < 180_000) {
+    cellSize = 20_000;
+  } else if (radiusMeters < 350_000) {
+    cellSize = 35_000;
+  } else if (radiusMeters < 700_000) {
+    cellSize = 60_000;
+  } else if (radiusMeters < 1_200_000) {
+    cellSize = 95_000;
+  } else if (radiusMeters < 1_800_000) {
+    cellSize = 145_000;
+  }
+
+  return Math.min(Math.max(cellSize, MIN_MAP_CELL_SIZE_METERS), MAX_MAP_CELL_SIZE_METERS);
 }
 
 function topVibesFromNearbyStats(row: NearbyPlaceRow) {
@@ -2380,6 +4523,55 @@ async function refreshPlaceVibeStats(env: Env, placeID: string, updatedAt: strin
     .run();
 }
 
+async function refreshPlaceVibeTagStats(env: Env, placeID: string, updatedAt: string): Promise<void> {
+  const nowMs = Date.now();
+  const windows = [
+    { id: "all_time", since: undefined },
+    { id: "last_30_days", since: new Date(nowMs - 30 * 24 * 60 * 60 * 1000).toISOString() },
+    { id: "last_365_days", since: new Date(nowMs - 365 * 24 * 60 * 60 * 1000).toISOString() },
+  ] as const;
+  const statements = [env.DB.prepare("DELETE FROM place_vibe_tag_stats WHERE place_id = ?").bind(placeID)];
+
+  for (const statsWindow of windows) {
+    const vibeEventCount = await fetchEventTotal(env, placeID, statsWindow.since);
+    if (vibeEventCount === 0) {
+      continue;
+    }
+
+    const tagCounts = await fetchTagCounts(env, placeID, statsWindow.since, 100);
+    for (const tagCount of tagCounts) {
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO place_vibe_tag_stats (
+             place_id,
+             vibe_tag_id,
+             window,
+             vibe_event_count,
+             tag_count,
+             selected_by_vibe_percent,
+             updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(place_id, vibe_tag_id, window) DO UPDATE SET
+             vibe_event_count = excluded.vibe_event_count,
+             tag_count = excluded.tag_count,
+             selected_by_vibe_percent = excluded.selected_by_vibe_percent,
+             updated_at = excluded.updated_at`
+        ).bind(
+          placeID,
+          tagCount.vibe_tag_id,
+          statsWindow.id,
+          vibeEventCount,
+          tagCount.tag_count,
+          percent(tagCount.tag_count, vibeEventCount),
+          updatedAt
+        )
+      );
+    }
+  }
+
+  await env.DB.batch(statements);
+}
+
 async function fetchEventTotal(env: Env, placeID: string, since?: string): Promise<number> {
   const result = await env.DB.prepare(
     `SELECT COUNT(*) AS total_vibes
@@ -2483,6 +4675,8 @@ function serializeVibeEvent(row: VibeEventRow) {
     ),
     source: row.source,
     app_version: row.app_version,
+    taxonomy_version_id: row.taxonomy_version_id ?? CURRENT_TAXONOMY_VERSION_ID,
+    submission_context: row.submission_context ?? row.source,
     created_at: row.created_at,
     updated_at: row.updated_at,
     moderation_status: row.moderation_status,

@@ -1,5 +1,9 @@
 # VibeMap Codex Instructions
 
+## Start Here
+
+Before changing code or deploying, read `docs/SESSION_HANDOFF.md`. It captures the current VIBES Y'ALL product decisions, Cloudflare/App Store/TestFlight setup, branded domains, and UI constraints from the long running build session.
+
 ## Remote TestFlight Push
 
 When Brian asks from Codex, including iOS Codex, to push VibeMap to TestFlight, do not ask him to run Terminal commands.

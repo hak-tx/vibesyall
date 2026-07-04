@@ -136,6 +136,33 @@ runOptional("Applying optional third vibe migration", "npx", [
   "--command=ALTER TABLE vibe_events ADD COLUMN third_vibe_tag_id TEXT REFERENCES vibe_tags(id)",
   "--yes",
 ], ["duplicate column", "already exists", "no such table"]);
+runOptional("Applying optional vibe taxonomy version column", "npx", [
+  "wrangler",
+  "d1",
+  "execute",
+  "vibe-map",
+  "--remote",
+  "--command=ALTER TABLE vibe_events ADD COLUMN taxonomy_version_id TEXT",
+  "--yes",
+], ["duplicate column", "already exists", "no such table"]);
+runOptional("Applying optional vibe submission context column", "npx", [
+  "wrangler",
+  "d1",
+  "execute",
+  "vibe-map",
+  "--remote",
+  "--command=ALTER TABLE vibe_events ADD COLUMN submission_context TEXT",
+  "--yes",
+], ["duplicate column", "already exists", "no such table"]);
+runOptional("Applying optional vibe place snapshot column", "npx", [
+  "wrangler",
+  "d1",
+  "execute",
+  "vibe-map",
+  "--remote",
+  "--command=ALTER TABLE vibe_events ADD COLUMN place_snapshot_json TEXT",
+  "--yes",
+], ["duplicate column", "already exists", "no such table"]);
 run("Applying production D1 schema", "npx", [
   "wrangler",
   "d1",
@@ -197,6 +224,42 @@ run("Ensuring account profile tables", "npx", [
   "vibe-map",
   "--remote",
   "--file=./migrations/2026-06-30-account-profiles.sql",
+  "--yes",
+]);
+run("Ensuring admin analytics tables", "npx", [
+  "wrangler",
+  "d1",
+  "execute",
+  "vibe-map",
+  "--remote",
+  "--file=./migrations/2026-07-04-admin-analytics.sql",
+  "--yes",
+]);
+run("Ensuring admin device labels", "npx", [
+  "wrangler",
+  "d1",
+  "execute",
+  "vibe-map",
+  "--remote",
+  "--file=./migrations/2026-07-04-admin-device-labels.sql",
+  "--yes",
+]);
+run("Ensuring commercial data structure", "npx", [
+  "wrangler",
+  "d1",
+  "execute",
+  "vibe-map",
+  "--remote",
+  "--file=./migrations/2026-07-04-commercial-data-structure.sql",
+  "--yes",
+]);
+run("Ensuring device identity links", "npx", [
+  "wrangler",
+  "d1",
+  "execute",
+  "vibe-map",
+  "--remote",
+  "--file=./migrations/2026-07-04-device-identity-links.sql",
   "--yes",
 ]);
 
