@@ -97,7 +97,9 @@ final class MockVibeService: VibeServicing {
             latitude: candidate.latitude,
             longitude: candidate.longitude,
             streetAddress: candidate.streetAddress,
-            category: candidate.category,
+            category: candidate.primaryCategory ?? candidate.category,
+            primaryCategory: candidate.primaryCategory ?? candidate.category,
+            providerCategory: candidate.providerCategory,
             city: candidate.city,
             region: candidate.region,
             country: candidate.country,
@@ -141,14 +143,14 @@ final class MockVibeService: VibeServicing {
             from: previousStats?.visibleTopVibes ?? [],
             adding: placeRatings,
             replacing: previousRating,
-            ratingCount: ratingCount
+            ratingCount: ratingCount,
+            primaryTag: primaryTag
         )
-        let topTag = topVibes.first?.vibeTag
 
         places[index].stats = PlaceStats(
             ratingCount: max(placeRatings.count, ratingCount),
             averageScore: average,
-            topVibeTag: topTag ?? primaryTag,
+            topVibeTag: primaryTag,
             topVibes: topVibes
         )
 
@@ -171,16 +173,35 @@ final class MockVibeService: VibeServicing {
             vibedPlaceCount: vibedPlaceCount,
             remainingPlaces: max(0, threshold - vibedPlaceCount),
             benefits: AccountBenefit.defaultBenefits,
-            profile: nil
+            profile: nil,
+            sessionToken: nil
         )
     }
 
     func requestAccountSignup(email: String, deviceIdHash: String) async throws -> AccountSignupResponse {
         AccountSignupResponse(
             status: "confirmation_sent",
-            emailSent: false,
+            emailSent: true,
+            appUrl: nil,
+            sessionToken: nil,
             account: try await fetchAccountEligibility(deviceIdHash: deviceIdHash),
             message: "Check your email to confirm your VIBES Y'ALL account."
+        )
+    }
+
+    func requestAccountLogin(email: String) async throws -> AccountLoginResponse {
+        AccountLoginResponse(
+            status: "recovery_sent",
+            emailSent: true,
+            message: "If that email has a VIBES Y'ALL account, a sign-in link is on the way."
+        )
+    }
+
+    func requestAccountLogout() async throws -> AccountLogoutResponse {
+        AccountLogoutResponse(
+            status: "logged_out",
+            revoked: true,
+            message: "You are logged out on this device."
         )
     }
 
@@ -192,11 +213,14 @@ final class MockVibeService: VibeServicing {
         )
     }
 
+    func recordAnalyticsEvent(name: String, deviceIdHash: String, properties: [String: String]) async {}
+
     private func topBreakdowns(
         from existingBreakdowns: [VibeBreakdown],
         adding ratings: [VibeRating],
         replacing previousRating: VibeRating?,
-        ratingCount: Int
+        ratingCount: Int,
+        primaryTag: VibeTag
     ) -> [VibeBreakdown] {
         guard ratingCount > 0 else { return [] }
 
@@ -212,7 +236,7 @@ final class MockVibeService: VibeServicing {
             counts[tag, default: 0] += 1
         }
 
-        return counts
+        let sortedBreakdowns = counts
             .filter { $0.value > 0 }
             .sorted { lhs, rhs in
                 if lhs.value == rhs.value {
@@ -220,7 +244,6 @@ final class MockVibeService: VibeServicing {
                 }
                 return lhs.value > rhs.value
             }
-            .prefix(3)
             .map { tag, count in
                 VibeBreakdown(
                     vibeTag: tag,
@@ -228,6 +251,10 @@ final class MockVibeService: VibeServicing {
                     percentage: Int((Double(count) / Double(ratingCount) * 100).rounded())
                 )
             }
+
+        return (sortedBreakdowns.filter { $0.vibeTag == primaryTag } + sortedBreakdowns.filter { $0.vibeTag != primaryTag })
+            .prefix(3)
+            .map { $0 }
     }
 
     private func dominantVibe(in places: [VibePlace]) -> VibeTag? {

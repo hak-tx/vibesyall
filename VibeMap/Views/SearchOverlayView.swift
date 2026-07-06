@@ -4,6 +4,7 @@ struct SearchOverlayView: View {
     @ObservedObject var viewModel: VibeMapViewModel
     @Binding var isSearchFocused: Bool
     let onMenuTap: () -> Void
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @FocusState private var isFieldFocused: Bool
 
     var body: some View {
@@ -19,7 +20,7 @@ struct SearchOverlayView: View {
                     .accessibilityLabel("Open VIBES Y'ALL menu")
                 }
 
-                vibeFilters
+                vibeFilters(containerWidth: geometry.size.width)
 
                 if shouldShowResults {
                     resultsPanel(maxHeight: resultsMaxHeight(in: geometry))
@@ -195,30 +196,74 @@ struct SearchOverlayView: View {
         .shadow(color: .black.opacity(0.10), radius: 12, y: 6)
     }
 
-    private var vibeFilters: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 7) {
-                Button {
-                    viewModel.setVibeFilter(nil)
-                } label: {
-                    VibeFilterChip(title: "All", vibe: nil, isSelected: !viewModel.hasActiveVibeFilters)
-                }
-                .buttonStyle(.plain)
+    @ViewBuilder
+    private func vibeFilters(containerWidth: CGFloat) -> some View {
+        if usesExpandedFilterLayout(containerWidth: containerWidth) {
+            HStack(spacing: 8) {
+                filterButton(title: "All", vibe: nil, isExpanded: true)
 
                 ForEach(VibeTag.bestToWorst(viewModel.allowedVibes)) { vibe in
-                    Button {
-                        viewModel.setVibeFilter(vibe)
-                    } label: {
-                        VibeFilterChip(
-                            title: vibe.mapLabel,
-                            vibe: vibe,
-                            isSelected: viewModel.selectedVibeFilters.contains(vibe)
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    filterButton(title: expandedFilterTitle(for: vibe), vibe: vibe, isExpanded: true)
                 }
             }
-            .padding(.horizontal, 2)
+            .frame(maxWidth: .infinity)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    filterButton(title: "All", vibe: nil, isExpanded: false)
+
+                    ForEach(VibeTag.bestToWorst(viewModel.allowedVibes)) { vibe in
+                        filterButton(title: vibe.mapLabel, vibe: vibe, isExpanded: false)
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+        }
+    }
+
+    private func filterButton(title: String, vibe: VibeTag?, isExpanded: Bool) -> some View {
+        Button {
+            viewModel.setVibeFilter(vibe)
+        } label: {
+            VibeFilterChip(
+                title: title,
+                vibe: vibe,
+                isSelected: filterIsSelected(vibe),
+                isExpanded: isExpanded
+            )
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: isExpanded ? .infinity : nil)
+    }
+
+    private func filterIsSelected(_ vibe: VibeTag?) -> Bool {
+        if let vibe {
+            return viewModel.selectedVibeFilters.contains(vibe)
+        }
+
+        return !viewModel.hasActiveVibeFilters
+    }
+
+    private func usesExpandedFilterLayout(containerWidth: CGFloat) -> Bool {
+        horizontalSizeClass == .regular && containerWidth >= 700
+    }
+
+    private func expandedFilterTitle(for vibe: VibeTag) -> String {
+        switch vibe {
+        case .changedMyLife:
+            "Changed\nMy Life"
+        case .worthTheDrive:
+            "Worth the\nDrive"
+        case .hiddenGem:
+            "Hidden\nGem"
+        case .touristTrap:
+            "Tourist\nTrap"
+        case .needsPrayer:
+            "Needs\nPrayer"
+        case .emotionallyDamaging:
+            "Emotionally\nDamaging"
+        default:
+            vibe.rawValue
         }
     }
 
@@ -238,9 +283,14 @@ private struct BrandMenuButtonLabel: View {
                 .scaledToFill()
                 .frame(width: 48, height: 48)
                 .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                .background {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(.white.opacity(0.94))
+                        .frame(width: 54, height: 54)
+                }
                 .overlay {
                     RoundedRectangle(cornerRadius: 15, style: .continuous)
-                        .stroke(.white.opacity(0.60), lineWidth: 1)
+                        .stroke(.white.opacity(0.96), lineWidth: 2.5)
                 }
 
             Image(systemName: "line.3.horizontal")
@@ -250,11 +300,11 @@ private struct BrandMenuButtonLabel: View {
                 .background(VibeDesign.brandBlue, in: Circle())
                 .overlay {
                     Circle()
-                        .stroke(.white.opacity(0.75), lineWidth: 1)
+                        .stroke(.white.opacity(0.96), lineWidth: 1.5)
                 }
-                .offset(x: 3, y: 3)
+                .offset(x: 5, y: 7)
         }
-        .shadow(color: .black.opacity(0.12), radius: 10, y: 5)
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
     }
 }
 
@@ -262,21 +312,26 @@ private struct VibeFilterChip: View {
     let title: String
     let vibe: VibeTag?
     let isSelected: Bool
+    var isExpanded = false
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: isExpanded ? 4 : 5) {
             Image(systemName: symbolName)
-                .font(.system(size: 10, weight: .black))
+                .font(.system(size: iconSize, weight: .black))
                 .foregroundStyle(isSelected ? .white : iconColor)
-                .frame(width: 12)
+                .frame(width: iconFrameWidth)
 
             Text(title)
-                .font(.caption.weight(.heavy))
+                .font(textFont)
                 .foregroundStyle(isSelected ? .white : VibeDesign.primaryText.opacity(0.72))
-                .lineLimit(1)
+                .multilineTextAlignment(.center)
+                .lineLimit(isExpanded ? 2 : 1)
+                .minimumScaleFactor(isExpanded ? 0.68 : 0.78)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 9)
-        .frame(height: 30)
+        .padding(.horizontal, horizontalPadding)
+        .frame(maxWidth: isExpanded ? .infinity : nil)
+        .frame(height: chipHeight)
         .background(isSelected ? VibeDesign.primary : VibeDesign.overlayBackground, in: Capsule())
         .overlay {
             Capsule()
@@ -291,6 +346,48 @@ private struct VibeFilterChip: View {
 
     private var iconColor: Color {
         vibe?.visualStyle.color ?? VibeDesign.primary
+    }
+
+    private var textFont: Font {
+        if isExpanded {
+            return .system(size: expandedTextSize, weight: .heavy)
+        }
+
+        if title == "Damaging" {
+            return .system(size: 10.4, weight: .heavy)
+        }
+
+        return .caption.weight(.heavy)
+    }
+
+    private var expandedTextSize: CGFloat {
+        let compactLength = title.replacingOccurrences(of: "\n", with: " ").count
+
+        if compactLength >= 20 {
+            return 8.8
+        }
+
+        if compactLength >= 14 {
+            return 9.4
+        }
+
+        return 10.4
+    }
+
+    private var iconSize: CGFloat {
+        isExpanded ? 11.5 : 10
+    }
+
+    private var iconFrameWidth: CGFloat {
+        isExpanded ? 14 : 12
+    }
+
+    private var horizontalPadding: CGFloat {
+        isExpanded ? 6 : 9
+    }
+
+    private var chipHeight: CGFloat {
+        isExpanded ? 42 : 30
     }
 }
 

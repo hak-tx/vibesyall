@@ -127,6 +127,24 @@ runOptional("Applying optional category migration", "npx", [
   "--command=ALTER TABLE places ADD COLUMN category TEXT",
   "--yes",
 ], ["duplicate column", "already exists"]);
+runOptional("Applying optional primary category migration", "npx", [
+  "wrangler",
+  "d1",
+  "execute",
+  "vibe-map",
+  "--remote",
+  "--command=ALTER TABLE places ADD COLUMN primary_category TEXT",
+  "--yes",
+], ["duplicate column", "already exists"]);
+runOptional("Applying optional provider category migration", "npx", [
+  "wrangler",
+  "d1",
+  "execute",
+  "vibe-map",
+  "--remote",
+  "--command=ALTER TABLE places ADD COLUMN provider_category TEXT",
+  "--yes",
+], ["duplicate column", "already exists"]);
 runOptional("Applying optional third vibe migration", "npx", [
   "wrangler",
   "d1",
@@ -260,6 +278,33 @@ run("Ensuring device identity links", "npx", [
   "vibe-map",
   "--remote",
   "--file=./migrations/2026-07-04-device-identity-links.sql",
+  "--yes",
+]);
+run("Ensuring place category levels", "npx", [
+  "wrangler",
+  "d1",
+  "execute",
+  "vibe-map",
+  "--remote",
+  "--file=./migrations/2026-07-05-place-category-levels.sql",
+  "--yes",
+]);
+run("Applying place category quality fixes", "npx", [
+  "wrangler",
+  "d1",
+  "execute",
+  "vibe-map",
+  "--remote",
+  "--file=./migrations/2026-07-05-place-category-quality-fixes.sql",
+  "--yes",
+]);
+run("Recomputing primary display vibes", "npx", [
+  "wrangler",
+  "d1",
+  "execute",
+  "vibe-map",
+  "--remote",
+  "--file=./migrations/2026-07-05-primary-display-vibes.sql",
   "--yes",
 ]);
 

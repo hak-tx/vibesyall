@@ -80,9 +80,15 @@ enum VibeMapDisplayStyle: String, CaseIterable, Identifiable {
 struct BottomPanel<Content: View>: View {
     private let content: Content
     private let onSwipeDown: (() -> Void)?
+    private let onSwipeUp: (() -> Void)?
 
-    init(onSwipeDown: (() -> Void)? = nil, @ViewBuilder content: () -> Content) {
+    init(
+        onSwipeDown: (() -> Void)? = nil,
+        onSwipeUp: (() -> Void)? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
         self.onSwipeDown = onSwipeDown
+        self.onSwipeUp = onSwipeUp
         self.content = content()
     }
 
@@ -120,12 +126,15 @@ struct BottomPanel<Content: View>: View {
             .highPriorityGesture(
                 DragGesture(minimumDistance: 10)
                     .onEnded { value in
-                        guard value.translation.height > 24,
-                              abs(value.translation.width) < 70 else {
+                        guard abs(value.translation.width) < 70 else {
                             return
                         }
 
-                        onSwipeDown?()
+                        if value.translation.height > 24 {
+                            onSwipeDown?()
+                        } else if value.translation.height < -24 {
+                            onSwipeUp?()
+                        }
                     }
             )
     }
@@ -359,40 +368,38 @@ struct AddressDirectionsLink: View {
             .fixedSize(horizontal: false, vertical: true)
         }
         .buttonStyle(.plain)
-        .confirmationDialog("Open directions", isPresented: $isChoosingMapApp, titleVisibility: .visible) {
+        .confirmationDialog("Learn More", isPresented: $isChoosingMapApp, titleVisibility: .visible) {
             Button("Apple Maps") {
-                MapDirectionsLauncher.openAppleMaps(for: place)
+                MapPlaceLauncher.openAppleMaps(for: place)
             }
 
             Button("Google Maps") {
-                MapDirectionsLauncher.openGoogleMaps(for: place)
+                MapPlaceLauncher.openGoogleMaps(for: place)
             }
 
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(place.name)
+            Text("Contact, directions, pictures, etc.")
         }
-        .accessibilityLabel("Directions to \(place.name)")
+        .accessibilityLabel("Open \(place.name) in Maps")
     }
 }
 
 @MainActor
-private enum MapDirectionsLauncher {
+private enum MapPlaceLauncher {
     static func openAppleMaps(for place: VibePlace) {
         Task {
             let mapItem = await appleMapItem(for: place)
-            mapItem.openInMaps(launchOptions: [
-                MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
-            ])
+            mapItem.openInMaps(launchOptions: nil)
         }
     }
 
     static func openGoogleMaps(for place: VibePlace) {
-        guard let webURL = googleWebDirectionsURL(for: place) else {
+        guard let webURL = googleWebPlaceURL(for: place) else {
             return
         }
 
-        if let appURL = googleAppDirectionsURL(for: place),
+        if let appURL = googleAppPlaceURL(for: place),
            UIApplication.shared.canOpenURL(appURL) {
             UIApplication.shared.open(appURL)
             return
@@ -403,7 +410,7 @@ private enum MapDirectionsLauncher {
 
     private static func appleMapItem(for place: VibePlace) async -> MKMapItem {
         let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = place.directionsSearchQuery
+        request.naturalLanguageQuery = place.mapPlaceSearchQuery
         request.region = MKCoordinateRegion(center: place.coordinate, latitudinalMeters: 700, longitudinalMeters: 700)
         request.resultTypes = .pointOfInterest
 
@@ -435,27 +442,26 @@ private enum MapDirectionsLauncher {
         }?.item ?? closeItems.first?.item
     }
 
-    private static func googleAppDirectionsURL(for place: VibePlace) -> URL? {
+    private static func googleAppPlaceURL(for place: VibePlace) -> URL? {
         var components = URLComponents(string: "comgooglemaps://")
         components?.queryItems = [
-            URLQueryItem(name: "daddr", value: place.directionsSearchQuery),
-            URLQueryItem(name: "directionsmode", value: "driving")
+            URLQueryItem(name: "q", value: place.mapPlaceSearchQuery),
+            URLQueryItem(name: "center", value: "\(place.latitude),\(place.longitude)")
         ]
         return components?.url
     }
 
-    private static func googleWebDirectionsURL(for place: VibePlace) -> URL? {
-        var components = URLComponents(string: "https://www.google.com/maps/dir/")
+    private static func googleWebPlaceURL(for place: VibePlace) -> URL? {
+        var components = URLComponents(string: "https://www.google.com/maps/search/")
         var queryItems = [
             URLQueryItem(name: "api", value: "1"),
-            URLQueryItem(name: "destination", value: place.directionsSearchQuery),
-            URLQueryItem(name: "travelmode", value: "driving")
+            URLQueryItem(name: "query", value: place.mapPlaceSearchQuery)
         ]
 
         if place.provider?.localizedCaseInsensitiveContains("google") == true,
            let providerPlaceId = place.providerPlaceId,
            !providerPlaceId.isEmpty {
-            queryItems.append(URLQueryItem(name: "destination_place_id", value: providerPlaceId))
+            queryItems.append(URLQueryItem(name: "query_place_id", value: providerPlaceId))
         }
 
         components?.queryItems = queryItems
@@ -472,7 +478,7 @@ private enum MapDirectionsLauncher {
 }
 
 private extension VibePlace {
-    var directionsSearchQuery: String {
+    var mapPlaceSearchQuery: String {
         [name, locationLine, country]
             .compactMap { value in
                 guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

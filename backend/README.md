@@ -30,6 +30,8 @@ The core tables are:
 
 `places` are upserted by `provider + provider_place_id` when a provider id is available.
 When a provider id is missing, the API falls back to a conservative nearby-name match before creating a new place id.
+Place categories keep two levels for future API/data licensing value: `primary_category` is the broad VIBES Y'ALL grouping used in the app UI, while `provider_category` stores the exact provider category when MapKit supplies one, such as `Cafe`, `Bakery`, `Winery`, or `Movie Theater`.
+The legacy `category` field remains a compatibility alias for the broad primary category.
 
 ## Vibe Tags
 

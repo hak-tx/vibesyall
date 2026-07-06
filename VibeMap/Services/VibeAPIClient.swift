@@ -9,7 +9,10 @@ protocol VibeServicing {
     func submitRating(placeId: String, deviceIdHash: String, vibeTags: [VibeTag]) async throws -> RatingSubmission
     func fetchAccountEligibility(deviceIdHash: String) async throws -> AccountEligibility
     func requestAccountSignup(email: String, deviceIdHash: String) async throws -> AccountSignupResponse
+    func requestAccountLogin(email: String) async throws -> AccountLoginResponse
+    func requestAccountLogout() async throws -> AccountLogoutResponse
     func requestAccountDeletion(email: String, deviceIdHash: String) async throws -> AccountDeletionResponse
+    func recordAnalyticsEvent(name: String, deviceIdHash: String, properties: [String: String]) async
 }
 
 struct VibeAPIClient: VibeServicing {
@@ -63,11 +66,14 @@ struct VibeAPIClient: VibeServicing {
     func fetchMapCells(latitude: Double, longitude: Double, radius: Double, cellSize: Double, vibeFilter: VibeTag?) async throws -> [MapCellCluster] {
         var components = URLComponents(url: baseURL.appendingPathComponent("places/map-cells"), resolvingAgainstBaseURL: false)
         let normalizedCellSize = AppConfig.roundedMapCellSize(cellSize)
+        let normalizedLatitude = AppConfig.roundedMapCellCoordinate(latitude, cellSize: normalizedCellSize)
+        let normalizedLongitude = AppConfig.roundedMapCellCoordinate(longitude, cellSize: normalizedCellSize)
+        let normalizedRadius = AppConfig.roundedMapCellRadius(radius)
         var queryItems = [
-            URLQueryItem(name: "lat", value: String(AppConfig.roundedMapCellCoordinate(latitude, cellSize: normalizedCellSize))),
-            URLQueryItem(name: "lng", value: String(AppConfig.roundedMapCellCoordinate(longitude, cellSize: normalizedCellSize))),
-            URLQueryItem(name: "radius", value: String(AppConfig.roundedMapCellRadius(radius))),
-            URLQueryItem(name: "cell_size", value: String(normalizedCellSize))
+            URLQueryItem(name: "lat", value: String(format: "%.3f", normalizedLatitude)),
+            URLQueryItem(name: "lng", value: String(format: "%.3f", normalizedLongitude)),
+            URLQueryItem(name: "radius", value: String(format: "%.0f", normalizedRadius)),
+            URLQueryItem(name: "cell_size", value: String(format: "%.0f", normalizedCellSize))
         ]
         if let vibeFilter {
             queryItems.append(URLQueryItem(name: "vibe_tag", value: vibeFilter.rawValue))
@@ -119,9 +125,37 @@ struct VibeAPIClient: VibeServicing {
         return try await send(path: "account/signup", method: "POST", body: request)
     }
 
+    func requestAccountLogin(email: String) async throws -> AccountLoginResponse {
+        let request = AccountLoginRequest(email: email)
+        return try await send(path: "account/login", method: "POST", body: request)
+    }
+
+    func requestAccountLogout() async throws -> AccountLogoutResponse {
+        try await send(path: "account/logout", method: "POST", body: AccountLogoutRequest())
+    }
+
     func requestAccountDeletion(email: String, deviceIdHash: String) async throws -> AccountDeletionResponse {
         let request = AccountDeletionRequest(email: email, deviceIdHash: deviceIdHash)
         return try await send(path: "account/delete", method: "POST", body: request)
+    }
+
+    func recordAnalyticsEvent(name: String, deviceIdHash: String, properties: [String: String]) async {
+        let request = AnalyticsEventRequest(
+            eventName: name,
+            platform: "ios",
+            properties: properties.isEmpty ? nil : properties
+        )
+
+        do {
+            let _: AnalyticsEventResponse = try await send(
+                path: "analytics/events",
+                method: "POST",
+                body: request,
+                deviceIdHash: deviceIdHash
+            )
+        } catch {
+            return
+        }
     }
 
     private func get<Response: Decodable>(path: String, deviceIdHash: String? = nil) async throws -> Response {
@@ -135,11 +169,16 @@ struct VibeAPIClient: VibeServicing {
         return try await perform(request)
     }
 
-    private func send<Body: Encodable, Response: Decodable>(path: String, method: String, body: Body) async throws -> Response {
+    private func send<Body: Encodable, Response: Decodable>(
+        path: String,
+        method: String,
+        body: Body,
+        deviceIdHash: String? = nil
+    ) async throws -> Response {
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.httpMethod = method
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        applyStandardHeaders(to: &request)
+        applyStandardHeaders(to: &request, deviceIdHash: deviceIdHash)
         request.httpBody = try encoder.encode(body)
         return try await perform(request)
     }
@@ -211,6 +250,16 @@ private struct RatingResponse: Decodable {
     var place: VibePlace
     var rating: VibeRating
     var discovery: RatingDiscovery?
+}
+
+private struct AnalyticsEventRequest: Encodable {
+    var eventName: String
+    var platform: String
+    var properties: [String: String]?
+}
+
+private struct AnalyticsEventResponse: Decodable {
+    var status: String
 }
 
 private struct ErrorResponse: Decodable {

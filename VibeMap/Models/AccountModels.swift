@@ -11,6 +11,7 @@ struct AccountEligibility: Decodable, Hashable {
     var remainingPlaces: Int
     var benefits: [String]
     var profile: AccountProfile?
+    var sessionToken: String?
 
     var progressText: String {
         if eligible {
@@ -37,7 +38,27 @@ struct AccountSignupRequest: Encodable {
 struct AccountSignupResponse: Decodable {
     var status: String
     var emailSent: Bool
+    var appUrl: String?
+    var sessionToken: String?
     var account: AccountEligibility
+    var message: String
+}
+
+struct AccountLoginRequest: Encodable {
+    var email: String
+}
+
+struct AccountLoginResponse: Decodable {
+    var status: String
+    var emailSent: Bool
+    var message: String
+}
+
+struct AccountLogoutRequest: Encodable {}
+
+struct AccountLogoutResponse: Decodable {
+    var status: String
+    var revoked: Bool
     var message: String
 }
 

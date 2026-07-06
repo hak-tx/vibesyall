@@ -82,7 +82,7 @@ enum VibeTag: String, CaseIterable, Codable, Identifiable, Hashable {
         case .worthTheDrive:
             "Drive"
         case .emotionallyDamaging:
-            "Damage"
+            "Damaging"
         case .iconic:
             "Iconic"
         case .hiddenGem:

@@ -53,7 +53,7 @@ The backend normalizes legacy labels to current tags. Do not lose old data when 
 
 - Search bar belongs near the top where it originally was, clear of the Dynamic Island. Do not push it down unnecessarily.
 - Search bar uses translucent `#102c6b` navy with `#dfd771` hint text and the VIBES Y'ALL logo to the left.
-- Default map mode should be standard unless the user has saved a preference.
+- Default map mode should be dark unless the user has saved a preference.
 - My-location dot and location button should read as blue, like normal map apps.
 - Filter chips sit below the search bar. Selected chip is navy/brand; unselected chips are translucent neutral with a thin navy border.
 - Filter chips also filter search result suggestions when the user is searching.

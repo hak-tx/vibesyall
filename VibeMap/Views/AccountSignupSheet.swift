@@ -15,6 +15,26 @@ struct AccountSignupSheet: View {
         prompt.eligibility.benefits.isEmpty ? AccountBenefit.defaultBenefits : prompt.eligibility.benefits
     }
 
+    private var isSignInMode: Bool {
+        prompt.eligibility.profile?.emailVerified == true && !viewModel.hasConfirmedAccount
+    }
+
+    private var titleText: String {
+        isSignInMode ? "Sign in" : "Save your vibes"
+    }
+
+    private var detailText: String {
+        isSignInMode ? "No password needed. We'll email a secure sign-in link." : prompt.eligibility.progressText
+    }
+
+    private var submitText: String {
+        if statusMessage != nil {
+            return "Sent"
+        }
+
+        return isSignInMode ? "Send sign-in link" : "Send confirmation"
+    }
+
     private var canSubmit: Bool {
         email.trimmingCharacters(in: .whitespacesAndNewlines).contains("@") && !isSubmitting
     }
@@ -23,12 +43,12 @@ struct AccountSignupSheet: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Save your vibes")
+                    Text(titleText)
                         .font(.largeTitle.weight(.black))
                         .foregroundStyle(VibeDesign.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text(prompt.eligibility.progressText)
+                    Text(detailText)
                         .font(.callout.weight(.semibold))
                         .foregroundStyle(VibeDesign.secondaryText)
                 }
@@ -92,7 +112,7 @@ struct AccountSignupSheet: View {
                             .tint(.white)
                     }
 
-                    Text(statusMessage == nil ? "Send confirmation" : "Sent")
+                    Text(submitText)
                         .font(.headline.weight(.black))
                 }
                 .foregroundStyle(.white)
@@ -129,8 +149,18 @@ struct AccountSignupSheet: View {
         defer { isSubmitting = false }
 
         do {
-            let response = try await viewModel.requestAccountSignup(email: email.trimmingCharacters(in: .whitespacesAndNewlines))
-            statusMessage = response.emailSent ? response.message : "Confirmation is ready. Email delivery still needs the Cloudflare email binding."
+            let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+            if isSignInMode {
+                let response = try await viewModel.requestAccountLogin(email: normalizedEmail)
+                statusMessage = response.emailSent
+                    ? "Check your email, tap the sign-in link, then return here."
+                    : response.message
+            } else {
+                let response = try await viewModel.requestAccountSignup(email: normalizedEmail)
+                statusMessage = response.status == "confirmation_sent"
+                    ? "Check your email, confirm the link, then return here. We'll finish setup automatically."
+                    : response.message
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -140,6 +170,7 @@ struct AccountSignupSheet: View {
 struct AppMenuSheet: View {
     let hasConfirmedAccount: Bool
     let onSignUp: () -> Void
+    let onLogout: () -> Void
     let onDeleteAccount: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -178,14 +209,30 @@ struct AppMenuSheet: View {
                 } label: {
                     MenuActionRow(
                         icon: hasConfirmedAccount ? "checkmark.seal.fill" : "person.crop.circle.badge.plus",
-                        title: hasConfirmedAccount ? "Account saved" : "Create account",
-                        subtitle: hasConfirmedAccount ? "Your confirmed account is active on this device." : "Available after 10 vibed places so your history can follow you.",
+                        title: hasConfirmedAccount ? "Account saved" : "Create or sign in",
+                        subtitle: hasConfirmedAccount ? "Your confirmed account is active on this device." : "Email links only. No password needed.",
                         tint: VibeDesign.brandBlue,
                         showsChevron: !hasConfirmedAccount
                     )
                 }
                 .buttonStyle(.plain)
                 .disabled(hasConfirmedAccount)
+
+                if hasConfirmedAccount {
+                    Button {
+                        dismiss()
+                        onLogout()
+                    } label: {
+                        MenuActionRow(
+                            icon: "rectangle.portrait.and.arrow.right",
+                            title: "Log out",
+                            subtitle: "Keep using the map anonymously on this device.",
+                            tint: .orange,
+                            showsChevron: false
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 Divider()
                     .padding(.leading, 48)

@@ -10,7 +10,7 @@ const MAX_MAP_CELL_QUERY_ROWS = 8_000;
 const MAX_MAP_CELL_RESPONSE_CELLS = 260;
 const MIN_MAP_CELL_SIZE_METERS = 10_000;
 const MAX_MAP_CELL_SIZE_METERS = 300_000;
-const CACHE_VERSION = "2026-07-04-map-cells-2";
+const CACHE_VERSION = "2026-07-05-primary-display-vibes-1";
 const LIVE_APP_STORE_URL = "https://apps.apple.com/us/app/vibes-yall/id6783989332?mt=8";
 const CACHE_TTL_SECONDS = {
   marketing: 60,
@@ -143,6 +143,8 @@ type PlaceRow = {
   longitude: number;
   street_address: string | null;
   category: string | null;
+  primary_category: string | null;
+  provider_category: string | null;
   city: string | null;
   region: string | null;
   country: string | null;
@@ -214,6 +216,7 @@ type VibeEventRow = {
 type TagCountRow = {
   vibe_tag_id: VibeTagID;
   tag_count: number;
+  first_seen_at: string | null;
 };
 
 type EventTotalRow = {
@@ -230,6 +233,10 @@ type PlaceInput = {
   street_address?: unknown;
   streetAddress?: unknown;
   category?: unknown;
+  primary_category?: unknown;
+  primaryCategory?: unknown;
+  provider_category?: unknown;
+  providerCategory?: unknown;
   city?: unknown;
   region?: unknown;
   country?: unknown;
@@ -3501,6 +3508,8 @@ async function getNearbyPlaces(request: Request, url: URL, env: Env): Promise<Re
             p.longitude,
             p.street_address,
             p.category,
+            p.primary_category,
+            p.provider_category,
             p.city,
             p.region,
             p.country,
@@ -3671,6 +3680,78 @@ async function getPlace(id: string, request: Request, env: Env): Promise<Respons
   return json({ place: await serializePlace(place, undefined, env, deviceIDHash) });
 }
 
+function normalizePlaceCategories(
+  name: string,
+  legacyCategory: string | null,
+  submittedPrimaryCategory: string | null,
+  submittedProviderCategory: string | null
+): {
+  category: string | null;
+  primaryCategory: string | null;
+  providerCategory: string | null;
+} {
+  const providerCategory =
+    normalizedProviderCategory(submittedProviderCategory) ?? inferredProviderCategoryFromName(name);
+  const providerKey = categoryKey(providerCategory);
+  let primaryCategory = submittedPrimaryCategory ?? legacyCategory;
+
+  switch (providerKey) {
+    case "movietheater":
+    case "theater":
+      primaryCategory = "Entertainment";
+      break;
+    case "musicvenue":
+      primaryCategory = "Music Venue";
+      break;
+  }
+
+  const primaryKey = categoryKey(primaryCategory);
+  if (
+    (primaryKey === "musicvenue" || primaryKey === "restaurant") &&
+    (providerKey === "movietheater" || providerKey === "theater")
+  ) {
+    primaryCategory = "Entertainment";
+  }
+
+  return {
+    category: primaryCategory ?? legacyCategory ?? providerCategory,
+    primaryCategory,
+    providerCategory,
+  };
+}
+
+function normalizedProviderCategory(category: string | null): string | null {
+  const key = categoryKey(category);
+  switch (key) {
+    case "cinema":
+    case "movietheater":
+      return "Movie Theater";
+    case "theater":
+      return "Theater";
+    case "musicvenue":
+      return "Music Venue";
+    default:
+      return category;
+  }
+}
+
+function inferredProviderCategoryFromName(name: string): string | null {
+  const normalizedName = ` ${name.toLowerCase()} `;
+  if (
+    normalizedName.includes(" cinem") ||
+    normalizedName.includes(" movie theater ") ||
+    normalizedName.includes(" movie theatre ")
+  ) {
+    return "Movie Theater";
+  }
+
+  return null;
+}
+
+function categoryKey(category: string | null): string {
+  return (category ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 async function upsertPlace(request: Request, env: Env): Promise<Response> {
   const body = await readJson<PlaceInput>(request);
   if (!body.ok) {
@@ -3696,7 +3777,13 @@ async function upsertPlace(request: Request, env: Env): Promise<Response> {
   const provider = cleanString(body.value.provider) ?? "mapkit";
   const providerPlaceID = cleanString(body.value.provider_place_id ?? body.value.providerPlaceId);
   const streetAddress = cleanString(body.value.street_address ?? body.value.streetAddress);
-  const category = cleanString(body.value.category);
+  const legacyCategory = cleanString(body.value.category);
+  const submittedPrimaryCategory = cleanString(body.value.primary_category ?? body.value.primaryCategory) ?? legacyCategory;
+  const submittedProviderCategory = cleanString(body.value.provider_category ?? body.value.providerCategory);
+  const normalizedCategories = normalizePlaceCategories(name, legacyCategory, submittedPrimaryCategory, submittedProviderCategory);
+  const category = normalizedCategories.category;
+  const primaryCategory = normalizedCategories.primaryCategory;
+  const providerCategory = normalizedCategories.providerCategory;
   const city = cleanString(body.value.city);
   const region = cleanString(body.value.region);
   const country = cleanString(body.value.country);
@@ -3706,8 +3793,9 @@ async function upsertPlace(request: Request, env: Env): Promise<Response> {
 
   await env.DB.prepare(
     `INSERT INTO places (
-       id, provider, provider_place_id, name, latitude, longitude, street_address, city, region, country, category, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       id, provider, provider_place_id, name, latitude, longitude, street_address, city, region, country, category,
+       primary_category, provider_category, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        provider = excluded.provider,
        provider_place_id = excluded.provider_place_id,
@@ -3718,10 +3806,28 @@ async function upsertPlace(request: Request, env: Env): Promise<Response> {
        city = COALESCE(excluded.city, places.city),
        region = COALESCE(excluded.region, places.region),
        country = COALESCE(excluded.country, places.country),
-       category = COALESCE(excluded.category, places.category),
+       category = COALESCE(excluded.primary_category, excluded.category, places.category),
+       primary_category = COALESCE(excluded.primary_category, excluded.category, places.primary_category, places.category),
+       provider_category = COALESCE(excluded.provider_category, places.provider_category),
        updated_at = excluded.updated_at`
   )
-    .bind(id, provider, providerPlaceID, name, latitude, longitude, streetAddress, city, region, country, category, now, now)
+    .bind(
+      id,
+      provider,
+      providerPlaceID,
+      name,
+      latitude,
+      longitude,
+      streetAddress,
+      city,
+      region,
+      country,
+      category,
+      primaryCategory,
+      providerCategory,
+      now,
+      now
+    )
     .run();
 
   await upsertPlaceExternalID(env, id, provider, providerPlaceID, now, "app_submission", 1.0);
@@ -3781,7 +3887,9 @@ function placeSnapshotForVibe(place: PlaceRow): string {
     city: place.city,
     region: place.region,
     country: place.country,
-    category: place.category,
+    category: place.primary_category ?? place.category,
+    primary_category: place.primary_category ?? place.category,
+    provider_category: place.provider_category,
     captured_at: new Date().toISOString(),
   });
 }
@@ -3988,7 +4096,7 @@ async function reportPlace(request: Request, env: Env, routePlaceID?: string): P
 
 async function fetchPlaceByID(env: Env, id: string): Promise<PlaceRow | null> {
   return env.DB.prepare(
-    `SELECT id, provider, provider_place_id, name, latitude, longitude, street_address, category, city, region, country, created_at, updated_at
+    `SELECT id, provider, provider_place_id, name, latitude, longitude, street_address, category, primary_category, provider_category, city, region, country, created_at, updated_at
      FROM places
      WHERE id = ?`
   )
@@ -4006,7 +4114,7 @@ async function findExistingPlaceForInput(
 ): Promise<PlaceRow | null> {
   if (providerPlaceID) {
     const exactProviderMatch = await env.DB.prepare(
-      `SELECT id, provider, provider_place_id, name, latitude, longitude, street_address, category, city, region, country, created_at, updated_at
+      `SELECT id, provider, provider_place_id, name, latitude, longitude, street_address, category, primary_category, provider_category, city, region, country, created_at, updated_at
        FROM places
        WHERE provider = ? AND provider_place_id = ?
        LIMIT 1`
@@ -4024,7 +4132,7 @@ async function findExistingPlaceForInput(
   const lngDelta = matchRadiusMeters / Math.max(111_320 * Math.cos((latitude * Math.PI) / 180), 1);
   const normalizedName = normalizePlaceName(name);
   const candidates = await env.DB.prepare(
-    `SELECT id, provider, provider_place_id, name, latitude, longitude, street_address, category, city, region, country, created_at, updated_at
+    `SELECT id, provider, provider_place_id, name, latitude, longitude, street_address, category, primary_category, provider_category, city, region, country, created_at, updated_at
      FROM places
      WHERE latitude BETWEEN ? AND ?
        AND longitude BETWEEN ? AND ?
@@ -4051,7 +4159,7 @@ async function serializePlace(
   deviceIDHash?: string | null
 ) {
   const stats = await fetchPlaceVibeStats(env, row.id);
-  const topVibes = stats && stats.total_vibes > 0 ? await fetchTopVibes(env, row.id, stats.total_vibes, 3) : [];
+  const topVibes = stats && stats.total_vibes > 0 ? await fetchTopVibes(env, row.id, stats.total_vibes, 3, stats.top_vibe_tag_id) : [];
   const myEvent = deviceIDHash ? await fetchVibeEventForDevice(env, row.id, deviceIDHash) : null;
   const recentPositivePercentage =
     stats && stats.last_30_day_total_vibes > 0 ? await fetchRecentPositivePercentage(env, row.id, stats.last_30_day_total_vibes, 30) : 0;
@@ -4064,7 +4172,9 @@ async function serializePlace(
     latitude: row.latitude,
     longitude: row.longitude,
     street_address: row.street_address,
-    category: row.category,
+    category: row.primary_category ?? row.category,
+    primary_category: row.primary_category ?? row.category,
+    provider_category: row.provider_category,
     city: row.city,
     region: row.region,
     country: row.country,
@@ -4114,7 +4224,9 @@ function serializeNearbyPlace(row: NearbyPlaceRow, distanceMetersValue: number |
     latitude: row.latitude,
     longitude: row.longitude,
     street_address: row.street_address,
-    category: row.category,
+    category: row.primary_category ?? row.category,
+    primary_category: row.primary_category ?? row.category,
+    provider_category: row.provider_category,
     city: row.city,
     region: row.region,
     country: row.country,
@@ -4397,8 +4509,18 @@ async function fetchVibeEventForUser(env: Env, placeID: string, anonymousUserID:
     .first<VibeEventRow>();
 }
 
-async function fetchTopVibes(env: Env, placeID: string, totalVibes: number, limit: number) {
-  const rows = await fetchTagCounts(env, placeID, undefined, limit);
+async function fetchTopVibes(
+  env: Env,
+  placeID: string,
+  totalVibes: number,
+  limit: number,
+  preferredTopVibeID?: VibeTagID | null
+) {
+  const rows = prioritizePreferredTopVibe(
+    await fetchTagCounts(env, placeID, undefined, Math.max(limit, VIBE_TAG_DEFINITIONS.length)),
+    preferredTopVibeID
+  ).slice(0, limit);
+
   return rows.map((row) => ({
     vibe_tag: legacyDisplayNameForTag(row.vibe_tag_id),
     vibe_tag_id: row.vibe_tag_id,
@@ -4409,6 +4531,31 @@ async function fetchTopVibes(env: Env, placeID: string, totalVibes: number, limi
     count: row.tag_count,
     percentage: Math.round((row.tag_count / Math.max(totalVibes, 1)) * 100),
   }));
+}
+
+function prioritizePreferredTopVibe(rows: TagCountRow[], preferredTopVibeID?: VibeTagID | null): TagCountRow[] {
+  if (!preferredTopVibeID) {
+    return rows;
+  }
+
+  const preferredRow = rows.find((row) => row.vibe_tag_id === preferredTopVibeID);
+  if (!preferredRow) {
+    return rows;
+  }
+
+  return [preferredRow, ...rows.filter((row) => row.vibe_tag_id !== preferredTopVibeID)];
+}
+
+function selectedTagCount(rows: TagCountRow[], tagID: VibeTagID | null | undefined): number | null {
+  if (!tagID) {
+    return null;
+  }
+
+  return rows.find((row) => row.vibe_tag_id === tagID)?.tag_count ?? null;
+}
+
+function supportingTopTag(rows: TagCountRow[], primaryDisplayTagID: VibeTagID | null | undefined): TagCountRow | null {
+  return rows.find((row) => row.vibe_tag_id !== primaryDisplayTagID) ?? null;
 }
 
 async function fetchRecentPositivePercentage(env: Env, placeID: string, denominator: number, days: number): Promise<number> {
@@ -4467,13 +4614,19 @@ async function refreshPlaceVibeStats(env: Env, placeID: string, updatedAt: strin
   const sinceYear = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
   const last30Total = await fetchEventTotal(env, placeID, since30);
   const lastYearTotal = await fetchEventTotal(env, placeID, sinceYear);
-  const allTimeTop = await fetchTagCounts(env, placeID, undefined, 2);
-  const last30Top = await fetchTagCounts(env, placeID, since30, 1);
-  const lastYearTop = await fetchTagCounts(env, placeID, sinceYear, 1);
-  const top = allTimeTop[0] ?? null;
-  const second = allTimeTop[1] ?? null;
-  const top30 = last30Top[0] ?? null;
-  const topYear = lastYearTop[0] ?? null;
+  const allTimePrimaryTop = await fetchPrimaryTagCounts(env, placeID, undefined, VIBE_TAG_DEFINITIONS.length);
+  const last30PrimaryTop = await fetchPrimaryTagCounts(env, placeID, since30, VIBE_TAG_DEFINITIONS.length);
+  const lastYearPrimaryTop = await fetchPrimaryTagCounts(env, placeID, sinceYear, VIBE_TAG_DEFINITIONS.length);
+  const allTimeSelectedTop = await fetchTagCounts(env, placeID, undefined, VIBE_TAG_DEFINITIONS.length);
+  const last30SelectedTop = await fetchTagCounts(env, placeID, since30, VIBE_TAG_DEFINITIONS.length);
+  const lastYearSelectedTop = await fetchTagCounts(env, placeID, sinceYear, VIBE_TAG_DEFINITIONS.length);
+  const top = allTimePrimaryTop[0] ?? allTimeSelectedTop[0] ?? null;
+  const second = supportingTopTag(allTimeSelectedTop, top?.vibe_tag_id);
+  const top30 = last30PrimaryTop[0] ?? last30SelectedTop[0] ?? null;
+  const topYear = lastYearPrimaryTop[0] ?? lastYearSelectedTop[0] ?? null;
+  const topSelectedCount = selectedTagCount(allTimeSelectedTop, top?.vibe_tag_id) ?? top?.tag_count ?? null;
+  const top30SelectedCount = selectedTagCount(last30SelectedTop, top30?.vibe_tag_id) ?? top30?.tag_count ?? null;
+  const topYearSelectedCount = selectedTagCount(lastYearSelectedTop, topYear?.vibe_tag_id) ?? topYear?.tag_count ?? null;
 
   await env.DB.prepare(
     `INSERT INTO place_vibe_stats (
@@ -4509,15 +4662,15 @@ async function refreshPlaceVibeStats(env: Env, placeID: string, updatedAt: strin
       placeID,
       allTimeTotal,
       top?.vibe_tag_id ?? null,
-      top ? percent(top.tag_count, allTimeTotal) : null,
+      topSelectedCount !== null ? percent(topSelectedCount, allTimeTotal) : null,
       second?.vibe_tag_id ?? null,
       second ? percent(second.tag_count, allTimeTotal) : null,
       last30Total,
       top30?.vibe_tag_id ?? null,
-      top30 ? percent(top30.tag_count, last30Total) : null,
+      top30SelectedCount !== null ? percent(top30SelectedCount, last30Total) : null,
       lastYearTotal,
       topYear?.vibe_tag_id ?? null,
-      topYear ? percent(topYear.tag_count, lastYearTotal) : null,
+      topYearSelectedCount !== null ? percent(topYearSelectedCount, lastYearTotal) : null,
       updatedAt
     )
     .run();
@@ -4586,27 +4739,42 @@ async function fetchEventTotal(env: Env, placeID: string, since?: string): Promi
   return result?.total_vibes ?? 0;
 }
 
+async function fetchPrimaryTagCounts(env: Env, placeID: string, since: string | undefined, limit: number): Promise<TagCountRow[]> {
+  const result = await env.DB.prepare(
+    `SELECT primary_vibe_tag_id AS vibe_tag_id, COUNT(*) AS tag_count, MIN(created_at) AS first_seen_at
+     FROM vibe_events
+     WHERE place_id = ? AND ${ACTIVE_EVENT_WHERE} AND (? IS NULL OR created_at >= ?)
+     GROUP BY primary_vibe_tag_id
+     ORDER BY tag_count DESC, first_seen_at ASC, primary_vibe_tag_id ASC
+     LIMIT ?`
+  )
+    .bind(placeID, since ?? null, since ?? null, limit)
+    .all<TagCountRow>();
+
+  return (result.results ?? []).filter((row): row is TagCountRow => Boolean(TAG_BY_ID.get(row.vibe_tag_id)));
+}
+
 async function fetchTagCounts(env: Env, placeID: string, since: string | undefined, limit: number): Promise<TagCountRow[]> {
   const result = await env.DB.prepare(
-    `SELECT vibe_tag_id, SUM(tag_count) AS tag_count
+    `SELECT vibe_tag_id, SUM(tag_count) AS tag_count, MIN(first_seen_at) AS first_seen_at
      FROM (
-       SELECT primary_vibe_tag_id AS vibe_tag_id, COUNT(*) AS tag_count
+       SELECT primary_vibe_tag_id AS vibe_tag_id, COUNT(*) AS tag_count, MIN(created_at) AS first_seen_at
        FROM vibe_events
        WHERE place_id = ? AND ${ACTIVE_EVENT_WHERE} AND (? IS NULL OR created_at >= ?)
        GROUP BY primary_vibe_tag_id
        UNION ALL
-       SELECT secondary_vibe_tag_id AS vibe_tag_id, COUNT(*) AS tag_count
+       SELECT secondary_vibe_tag_id AS vibe_tag_id, COUNT(*) AS tag_count, MIN(created_at) AS first_seen_at
        FROM vibe_events
        WHERE place_id = ? AND ${ACTIVE_EVENT_WHERE} AND secondary_vibe_tag_id IS NOT NULL AND (? IS NULL OR created_at >= ?)
        GROUP BY secondary_vibe_tag_id
        UNION ALL
-       SELECT third_vibe_tag_id AS vibe_tag_id, COUNT(*) AS tag_count
+       SELECT third_vibe_tag_id AS vibe_tag_id, COUNT(*) AS tag_count, MIN(created_at) AS first_seen_at
        FROM vibe_events
        WHERE place_id = ? AND ${ACTIVE_EVENT_WHERE} AND third_vibe_tag_id IS NOT NULL AND (? IS NULL OR created_at >= ?)
        GROUP BY third_vibe_tag_id
      )
      GROUP BY vibe_tag_id
-     ORDER BY tag_count DESC, vibe_tag_id ASC
+     ORDER BY tag_count DESC, first_seen_at ASC, vibe_tag_id ASC
      LIMIT ?`
   )
     .bind(

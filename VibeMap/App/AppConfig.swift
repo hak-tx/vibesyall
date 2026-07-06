@@ -2,6 +2,13 @@ import CoreLocation
 import Foundation
 import MapKit
 
+enum MapRenderingTier {
+    case detail
+    case local
+    case metro
+    case regional
+}
+
 enum AppConfig {
     static var backendBaseURL: URL {
         if let configuredURL = Bundle.main.object(forInfoDictionaryKey: "VIBE_MAP_BACKEND_BASE_URL") as? String,
@@ -14,16 +21,23 @@ enum AppConfig {
     }
 
     static var betaAccessToken: String? {
-        guard let token = Bundle.main.object(forInfoDictionaryKey: "VIBE_BETA_ACCESS_TOKEN") as? String else {
-            return nil
+        var candidates = [
+            Bundle.main.object(forInfoDictionaryKey: "VIBE_BETA_ACCESS_TOKEN") as? String
+        ]
+
+        #if DEBUG
+        candidates.append(ProcessInfo.processInfo.environment["VIBE_BETA_ACCESS_TOKEN"])
+        candidates.append(UserDefaults.standard.string(forKey: "vibes-yall.debug-beta-access-token"))
+        #endif
+
+        for candidate in candidates {
+            let trimmedToken = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !trimmedToken.isEmpty, !trimmedToken.hasPrefix("$(") {
+                return trimmedToken
+            }
         }
 
-        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedToken.isEmpty, !trimmedToken.hasPrefix("$(") else {
-            return nil
-        }
-
-        return trimmedToken
+        return nil
     }
 
     static let privacyPolicyURL = URL(string: "https://vibesyall.com/privacy")!
@@ -40,18 +54,25 @@ enum AppConfig {
     static let maximumNearbyRadiusMeters: CLLocationDistance = 2_500_000
     static let personalizedNearbyRadiusMeters: CLLocationDistance = 75_000
     static let addressEnrichmentMaximumRadiusMeters: CLLocationDistance = 40_000
-    static let serverMapCellMinimumRadiusMeters: CLLocationDistance = 120_000
-    static let maximumRenderedMapPlaces = 180
+    static let serverMapCellMinimumRadiusMeters: CLLocationDistance = 240_000
+    static let maximumRenderedMapCellClusters = 56
+    static let maximumContinuityMapCellClusters = 18
     static let nearbyMemoryCacheTTL: TimeInterval = 5 * 60
     static let nearbyMemoryCacheLimit = 48
     static let mapCellMemoryCacheTTL: TimeInterval = 10 * 60
     static let mapCellMemoryCacheLimit = 80
-    static let nearbyReloadDebounce: Duration = .milliseconds(220)
+    static let nearbyReloadDebounce: Duration = .milliseconds(120)
     static let initialUserMapDistanceMeters: CLLocationDistance = 50_000
     static let currentLocationMapDistanceMeters: CLLocationDistance = 12_000
 
     static var defaultMapCenter: CLLocationCoordinate2D {
-        CLLocationCoordinate2D(latitude: 30.2672, longitude: -97.7431)
+        #if DEBUG
+        if usesSimulatorHoustonMapDefault {
+            return houstonMapCenter
+        }
+        #endif
+
+        return CLLocationCoordinate2D(latitude: 30.2672, longitude: -97.7431)
     }
 
     static var initialMapCenter: CLLocationCoordinate2D {
@@ -59,7 +80,25 @@ enum AppConfig {
     }
 
     static var defaultMapDistanceMeters: CLLocationDistance {
-        isDemoMode ? 9_000 : 50_000
+        if let debugInitialMapDistanceMeters {
+            return debugInitialMapDistanceMeters
+        }
+
+        #if DEBUG
+        if usesSimulatorHoustonMapDefault {
+            return 90_000
+        }
+        #endif
+
+        return isDemoMode ? 9_000 : 50_000
+    }
+
+    static var shouldSkipInitialUserLocationAutocenter: Bool {
+        #if DEBUG
+        debugInitialMapCenter != nil || usesSimulatorHoustonMapDefault
+        #else
+        false
+        #endif
     }
 
     static func nearbyRadius(for region: MKCoordinateRegion) -> CLLocationDistance {
@@ -93,24 +132,85 @@ enum AppConfig {
     }
 
     static func shouldUseServerMapCells(for radius: CLLocationDistance) -> Bool {
-        radius >= serverMapCellMinimumRadiusMeters
+        switch mapRenderingTier(for: radius) {
+        case .metro, .regional:
+            true
+        case .detail, .local:
+            false
+        }
     }
 
     static func mapCellSize(for radius: CLLocationDistance) -> CLLocationDistance {
-        roundedMapCellSize(min(max(radius / 10, 12_000), 240_000))
+        let cellSize: CLLocationDistance
+        switch radius {
+        case ..<350_000:
+            cellSize = 50_000
+        case ..<700_000:
+            cellSize = 70_000
+        case ..<1_200_000:
+            cellSize = 95_000
+        case ..<1_800_000:
+            cellSize = 145_000
+        default:
+            cellSize = 220_000
+        }
+
+        return roundedMapCellSize(cellSize)
+    }
+
+    static func mapCellDisplayLimit(for radius: CLLocationDistance) -> Int {
+        switch radius {
+        case ..<350_000:
+            return 56
+        case ..<700_000:
+            return 52
+        case ..<1_200_000:
+            return 44
+        case ..<1_800_000:
+            return 36
+        default:
+            return 32
+        }
+    }
+
+    static func minimumMapCellDisplayCount(for radius: CLLocationDistance) -> Int {
+        switch mapRenderingTier(for: radius) {
+        case .detail, .local, .metro:
+            return 2
+        case .regional:
+            return 3
+        }
+    }
+
+    static func shouldShowContinuityMapCells(for radius: CLLocationDistance) -> Bool {
+        switch mapRenderingTier(for: radius) {
+        case .local:
+            return true
+        case .detail:
+            return radius >= nearbyRadiusMeters * 2
+        case .metro, .regional:
+            return false
+        }
+    }
+
+    static func mapCellContinuityMatchDistance(for cluster: MapCellCluster) -> CLLocationDistance {
+        min(max(cluster.cellSizeMeters * 0.55, 8_000), 36_000)
+    }
+
+    static func maximumRenderedMapPlaces(for region: MKCoordinateRegion) -> Int {
+        switch mapRenderingTier(for: region) {
+        case .detail:
+            return 180
+        case .local:
+            return 160
+        case .metro, .regional:
+            return 0
+        }
     }
 
     static func roundedMapCellCoordinate(_ value: CLLocationDegrees, cellSize: CLLocationDistance) -> CLLocationDegrees {
-        let decimalPlaces: Int
-        if cellSize >= 100_000 {
-            decimalPlaces = 1
-        } else if cellSize >= 30_000 {
-            decimalPlaces = 2
-        } else {
-            decimalPlaces = 3
-        }
-
-        return round(value, decimalPlaces: decimalPlaces)
+        let step = mapCellCoordinateStep(for: roundedMapCellSize(cellSize))
+        return roundToNearestStep(value, step: step)
     }
 
     static func roundedMapCellRadius(_ radius: CLLocationDistance) -> CLLocationDistance {
@@ -134,8 +234,15 @@ enum AppConfig {
 
     static func clusterRadius(for region: MKCoordinateRegion) -> CLLocationDistance {
         let halfWidth = visibleHalfWidthMeters(for: region)
-        guard halfWidth >= 1_800 else { return 0 }
-        return min(max(halfWidth / 16, 120), 42_000)
+        switch mapRenderingTier(for: region) {
+        case .detail:
+            guard halfWidth >= 1_800 else { return 0 }
+            return min(max(halfWidth / 18, 120), 2_400)
+        case .local:
+            return min(max(halfWidth / 24, 160), 7_500)
+        case .metro, .regional:
+            return 0
+        }
     }
 
     static func clusterFocusDistance(for region: MKCoordinateRegion) -> CLLocationDistance {
@@ -147,6 +254,23 @@ enum AppConfig {
         let currentWidth = visibleHalfWidthMeters(for: region) * 2
         let cellFocus = cluster.cellSizeMeters * 4
         return min(max(min(currentWidth * 0.55, cellFocus), 25_000), 450_000)
+    }
+
+    static func mapRenderingTier(for region: MKCoordinateRegion) -> MapRenderingTier {
+        mapRenderingTier(for: nearbyRadius(for: region))
+    }
+
+    static func mapRenderingTier(for radius: CLLocationDistance) -> MapRenderingTier {
+        switch radius {
+        case ..<20_000:
+            return .detail
+        case ..<serverMapCellMinimumRadiusMeters:
+            return .local
+        case ..<700_000:
+            return .metro
+        default:
+            return .regional
+        }
     }
 
     private static var isDemoMode: Bool {
@@ -190,6 +314,37 @@ enum AppConfig {
         #endif
     }
 
+    private static var debugInitialMapDistanceMeters: CLLocationDistance? {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "--debug-distance"),
+              arguments.indices.contains(index + 1),
+              let distance = CLLocationDistance(arguments[index + 1]) else {
+            return nil
+        }
+
+        return distance
+        #else
+        return nil
+        #endif
+    }
+
+    private static var houstonMapCenter: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: 29.7604, longitude: -95.3698)
+    }
+
+    private static var usesSimulatorHoustonMapDefault: Bool {
+        #if DEBUG
+        #if targetEnvironment(simulator)
+        true
+        #else
+        false
+        #endif
+        #else
+        false
+        #endif
+    }
+
     private static func visibleHalfDiagonalMeters(for region: MKCoordinateRegion) -> CLLocationDistance {
         let center = CLLocation(latitude: region.center.latitude, longitude: region.center.longitude)
         let corner = CLLocation(
@@ -219,5 +374,16 @@ enum AppConfig {
     private static func round(_ value: Double, decimalPlaces: Int) -> Double {
         let scale = pow(10.0, Double(decimalPlaces))
         return (value * scale).rounded() / scale
+    }
+
+    private static func mapCellCoordinateStep(for cellSize: CLLocationDistance) -> CLLocationDegrees {
+        let cellDegrees = cellSize / 111_320
+        let step = min(max(cellDegrees * 0.5, 0.05), 0.5)
+        return round(step, decimalPlaces: 3)
+    }
+
+    private static func roundToNearestStep(_ value: Double, step: Double) -> Double {
+        guard step > 0 else { return value }
+        return (value / step).rounded() * step
     }
 }

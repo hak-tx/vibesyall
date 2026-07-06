@@ -4,22 +4,42 @@ import UIKit
 struct NearbyVibesPanel: View {
     @ObservedObject var viewModel: VibeMapViewModel
     @Binding var isMinimized: Bool
+    private let availableHeight: CGFloat
     @State private var visiblePlaceLimit = 10
+    @State private var isListExpanded = false
 
     private static let initialExpandedPlaceLimit = 10
+    private static let tallExpandedPlaceLimit = 30
     private static let placePageSize = 10
     private static let maximumExpandedPlaceLimit = 60
+    private static let tallPanelTopClearance: CGFloat = 170
+
+    init(
+        viewModel: VibeMapViewModel,
+        isMinimized: Binding<Bool>,
+        availableHeight: CGFloat = UIScreen.main.bounds.height
+    ) {
+        self.viewModel = viewModel
+        self._isMinimized = isMinimized
+        self.availableHeight = availableHeight
+    }
 
     var body: some View {
-        BottomPanel(onSwipeDown: minimizeIfNeeded) {
+        BottomPanel(onSwipeDown: minimizeIfNeeded, onSwipeUp: expandListIfNeeded) {
             if isMinimized {
                 minimizedContent
             } else {
                 expandedContent
             }
         }
-        .onChange(of: visibleListSignature) { _ in
-            visiblePlaceLimit = Self.initialExpandedPlaceLimit
+        .onChange(of: visibleListSignature) { _, _ in
+            visiblePlaceLimit = defaultVisiblePlaceLimit
+        }
+        .onChange(of: isMinimized) { _, minimized in
+            if minimized {
+                isListExpanded = false
+                visiblePlaceLimit = Self.initialExpandedPlaceLimit
+            }
         }
     }
 
@@ -93,7 +113,18 @@ struct NearbyVibesPanel: View {
         guard !isMinimized else { return }
 
         withAnimation(.easeInOut(duration: 0.18)) {
+            isListExpanded = false
             isMinimized = true
+        }
+    }
+
+    private func expandListIfNeeded() {
+        guard !isListExpanded || isMinimized else { return }
+
+        withAnimation(.easeInOut(duration: 0.18)) {
+            isMinimized = false
+            isListExpanded = true
+            visiblePlaceLimit = max(visiblePlaceLimit, defaultVisiblePlaceLimit)
         }
     }
 
@@ -108,7 +139,7 @@ struct NearbyVibesPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 14)
         } else if viewModel.isShowingMapCellClusters && viewModel.visibleNearbyPlaces.isEmpty {
-            Text("\(viewModel.visibleNearbyPlaceCount) places in this area. Zoom in or tap a cluster to see the list.")
+            Text("\(viewModel.visibleNearbyPlaceCount) places in this area. Zoom in to see the list.")
                 .font(.subheadline)
                 .foregroundStyle(VibeDesign.secondaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -219,7 +250,7 @@ struct NearbyVibesPanel: View {
     }
 
     private var listHeight: CGFloat {
-        min(listContentHeight, maxExpandedListHeight)
+        min(listContentHeight, maxListHeight)
     }
 
     private var listContentHeight: CGFloat {
@@ -256,6 +287,14 @@ struct NearbyVibesPanel: View {
 
     private var visibleListSignature: String {
         viewModel.visibleNearbyPlaces.map(\.id).joined(separator: "|")
+    }
+
+    private var defaultVisiblePlaceLimit: Int {
+        if isListExpanded {
+            return min(Self.tallExpandedPlaceLimit, max(totalListablePlaceCount, Self.initialExpandedPlaceLimit))
+        }
+
+        return Self.initialExpandedPlaceLimit
     }
 
     private var showMoreButton: some View {
@@ -303,10 +342,19 @@ struct NearbyVibesPanel: View {
         .allowsHitTesting(false)
     }
 
-    private var maxExpandedListHeight: CGFloat {
-        let targetPanelHeight = UIScreen.main.bounds.height * 0.40
+    private var maxListHeight: CGFloat {
+        let targetPanelHeight = isListExpanded ? tallPanelHeight : standardPanelHeight
         let nonListHeight: CGFloat = 92
         return max(160, targetPanelHeight - nonListHeight)
+    }
+
+    private var standardPanelHeight: CGFloat {
+        min(max(availableHeight * 0.40, 260), 440)
+    }
+
+    private var tallPanelHeight: CGFloat {
+        let expandedAvailableHeight = availableHeight - Self.tallPanelTopClearance
+        return max(standardPanelHeight, expandedAvailableHeight)
     }
 
     private var minimizedSubtitle: String {

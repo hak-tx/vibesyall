@@ -12,27 +12,75 @@ struct MapKitPlaceSearchService: PlaceSearching {
     private static let overlappingPOISearchRadiusMeters: CLLocationDistance = 24
     private static let overlappingPOIDistanceMeters: CLLocationDistance = 8
     private static let fallbackNamedPOISearchRadiusMeters: CLLocationDistance = 160
+    private static let localSearchRadiusMeters: CLLocationDistance = 30_000
     private static let mapTapResultLimit = 4
 
     func search(query: String, near coordinate: CLLocationCoordinate2D?) async throws -> [PlaceCandidate] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        var candidates: [PlaceCandidate] = []
+        var searchErrors: [Error] = []
+
+        if let coordinate {
+            do {
+                candidates.append(
+                    contentsOf: try await searchCandidates(
+                        query: trimmedQuery,
+                        origin: coordinate,
+                        region: MKCoordinateRegion(
+                            center: coordinate,
+                            latitudinalMeters: Self.localSearchRadiusMeters,
+                            longitudinalMeters: Self.localSearchRadiusMeters
+                        )
+                    )
+                )
+            } catch {
+                searchErrors.append(error)
+            }
+        }
+
+        do {
+            candidates.append(
+                contentsOf: try await searchCandidates(
+                    query: trimmedQuery,
+                    origin: coordinate,
+                    region: nil
+                )
+            )
+        } catch {
+            searchErrors.append(error)
+        }
+
+        guard !candidates.isEmpty else {
+            if let error = searchErrors.first {
+                throw error
+            }
+            return []
+        }
+
+        return Array(
+            candidates
+                .sortedBySearchRelevance(query: trimmedQuery)
+                .uniquedByCandidateIdentity()
+                .prefix(10)
+        )
+    }
+
+    private func searchCandidates(
+        query: String,
+        origin: CLLocationCoordinate2D?,
+        region: MKCoordinateRegion?
+    ) async throws -> [PlaceCandidate] {
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = query
         request.resultTypes = .pointOfInterest
 
-        if let coordinate {
-            request.region = MKCoordinateRegion(
-                center: coordinate,
-                latitudinalMeters: 30_000,
-                longitudinalMeters: 30_000
-            )
+        if let region {
+            request.region = region
         }
 
         let response = try await MKLocalSearch(request: request).start()
-        let candidates = response.mapItems
-            .map { candidate(for: $0, origin: coordinate) }
-            .sortedByDistance()
-
-        return Array(candidates.prefix(8))
+        return response.mapItems
+            .map { candidate(for: $0, origin: origin) }
     }
 
     func pointOfInterestChoices(for selectedItem: MKMapItem) async throws -> [PlaceCandidateMatch] {
@@ -42,7 +90,7 @@ struct MapKitPlaceSearchService: PlaceSearching {
             candidate: selectedCandidate,
             distanceMeters: 0
         )
-        let nearbyMatches = try await pointOfInterestMatches(near: selectedCoordinate)
+        let nearbyMatches = ((try? await pointOfInterestMatches(near: selectedCoordinate)) ?? [])
             .filter { match in
                 match.distanceMeters <= Self.overlappingPOIDistanceMeters &&
                     match.candidate.id != selectedCandidate.id
@@ -81,6 +129,8 @@ struct MapKitPlaceSearchService: PlaceSearching {
                         longitude: coordinate.longitude,
                         streetAddress: nil,
                         category: categoryLabel(forName: title),
+                        primaryCategory: categoryLabel(forName: title),
+                        providerCategory: nil,
                         city: nil,
                         region: nil,
                         country: nil,
@@ -144,7 +194,9 @@ struct MapKitPlaceSearchService: PlaceSearching {
             latitude: coordinate.latitude,
             longitude: coordinate.longitude,
             streetAddress: streetAddress(for: placemark),
-            category: categoryLabel(for: item),
+            category: primaryCategoryLabel(for: item),
+            primaryCategory: primaryCategoryLabel(for: item),
+            providerCategory: providerCategoryLabel(for: item),
             city: placemark.locality,
             region: placemark.administrativeArea,
             country: placemark.countryCode,
@@ -152,7 +204,7 @@ struct MapKitPlaceSearchService: PlaceSearching {
         )
     }
 
-    private func categoryLabel(for item: MKMapItem) -> String? {
+    private func primaryCategoryLabel(for item: MKMapItem) -> String? {
         let name = item.name ?? item.placemark.name
 
         guard let category = item.pointOfInterestCategory else {
@@ -174,7 +226,9 @@ struct MapKitPlaceSearchService: PlaceSearching {
             return "Bar"
         case "park", "nationalpark", "beach", "campground":
             return "Park"
-        case "theater", "movietheater":
+        case "movietheater", "theater":
+            return "Entertainment"
+        case "musicvenue":
             return "Music Venue"
         case "stadium":
             return "Stadium"
@@ -207,6 +261,36 @@ struct MapKitPlaceSearchService: PlaceSearching {
         }
     }
 
+    private func providerCategoryLabel(for item: MKMapItem) -> String? {
+        guard let category = item.pointOfInterestCategory else {
+            return nil
+        }
+
+        let rawCategory = category.rawValue
+            .replacingOccurrences(of: "MKPOICategory", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !rawCategory.isEmpty else {
+            return nil
+        }
+
+        switch rawCategory {
+        case "ATM":
+            return "ATM"
+        case "EVCharger":
+            return "EV Charger"
+        case "RVPark":
+            return "RV Park"
+        default:
+            let spaced = rawCategory.replacingOccurrences(
+                of: "([a-z0-9])([A-Z])",
+                with: "$1 $2",
+                options: .regularExpression
+            )
+            return spaced
+        }
+    }
+
     private func categoryLabel(forName name: String?) -> String? {
         guard let name = name?.lowercased() else {
             return nil
@@ -214,6 +298,10 @@ struct MapKitPlaceSearchService: PlaceSearching {
 
         if name.contains("stadium") || name.contains("arena") || name.contains("ballpark") {
             return "Stadium"
+        }
+
+        if name.contains("cinem") || name.contains("movie theater") || name.contains("movie theatre") || name.contains("theater") || name.contains("theatre") {
+            return "Entertainment"
         }
 
         if name.contains("music") || name.contains("concert") || name.contains("venue") || name.contains("the masonic") {
@@ -337,11 +425,20 @@ struct MapKitPlaceSearchService: PlaceSearching {
 }
 
 private extension Array where Element == PlaceCandidate {
-    func sortedByDistance() -> [PlaceCandidate] {
+    func sortedBySearchRelevance(query: String) -> [PlaceCandidate] {
         sorted { lhs, rhs in
+            let lhsRelevance = Self.searchRelevance(for: lhs, query: query)
+            let rhsRelevance = Self.searchRelevance(for: rhs, query: query)
+            if lhsRelevance != rhsRelevance {
+                return lhsRelevance < rhsRelevance
+            }
+
             switch (lhs.distanceMeters, rhs.distanceMeters) {
             case let (lhsDistance?, rhsDistance?):
-                return lhsDistance < rhsDistance
+                if abs(lhsDistance - rhsDistance) > 25 {
+                    return lhsDistance < rhsDistance
+                }
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             case (.some, nil):
                 return true
             case (nil, .some):
@@ -350,6 +447,78 @@ private extension Array where Element == PlaceCandidate {
                 return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
         }
+    }
+
+    func uniquedByCandidateIdentity() -> [PlaceCandidate] {
+        var seenKeys = Set<String>()
+        return filter { candidate in
+            seenKeys.insert(Self.identityKey(for: candidate)).inserted
+        }
+    }
+
+    private static func searchRelevance(for candidate: PlaceCandidate, query: String) -> Int {
+        let normalizedQuery = normalized(query)
+        guard !normalizedQuery.isEmpty else {
+            return 5
+        }
+
+        let queryTokens = normalizedQuery
+            .split(separator: " ")
+            .map(String.init)
+        let normalizedName = normalized(candidate.name)
+        let searchableText = normalized(
+            [
+                candidate.name,
+                candidate.streetAddress,
+                candidate.city,
+                candidate.region,
+                candidate.country,
+                candidate.category,
+                candidate.primaryCategory,
+                candidate.providerCategory
+            ]
+                .compactMap { $0 }
+                .joined(separator: " ")
+        )
+
+        if normalizedName == normalizedQuery {
+            return 0
+        }
+
+        if normalizedName.hasPrefix(normalizedQuery) || normalizedName.contains(normalizedQuery) {
+            return 1
+        }
+
+        if queryTokens.allSatisfy({ normalizedName.contains($0) }) {
+            return 2
+        }
+
+        if queryTokens.allSatisfy({ searchableText.contains($0) }) {
+            return 3
+        }
+
+        return 4
+    }
+
+    private static func identityKey(for candidate: PlaceCandidate) -> String {
+        if let providerPlaceId = candidate.providerPlaceId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !providerPlaceId.isEmpty {
+            return "\(candidate.provider)|\(normalized(providerPlaceId))"
+        }
+
+        return [
+            normalized(candidate.name),
+            String(format: "%.4f", candidate.latitude),
+            String(format: "%.4f", candidate.longitude)
+        ].joined(separator: "|")
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 }
 

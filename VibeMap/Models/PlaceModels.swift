@@ -76,6 +76,8 @@ struct VibePlace: Identifiable, Codable, Hashable {
     var longitude: Double
     var streetAddress: String?
     var category: String?
+    var primaryCategory: String? = nil
+    var providerCategory: String? = nil
     var city: String?
     var region: String?
     var country: String?
@@ -178,6 +180,14 @@ struct VibePlace: Identifiable, Codable, Hashable {
     }
 
     var displayCategory: String? {
+        if let category = providerCategory?.trimmingCharacters(in: .whitespacesAndNewlines), !category.isEmpty {
+            return Self.normalizedCategory(category)
+        }
+
+        if let category = primaryCategory?.trimmingCharacters(in: .whitespacesAndNewlines), !category.isEmpty {
+            return Self.normalizedCategory(category)
+        }
+
         if let category = category?.trimmingCharacters(in: .whitespacesAndNewlines), !category.isEmpty {
             return Self.normalizedCategory(category)
         }
@@ -289,6 +299,8 @@ struct PlaceCandidate: Codable, Hashable, Identifiable {
     var longitude: Double
     var streetAddress: String?
     var category: String?
+    var primaryCategory: String? = nil
+    var providerCategory: String? = nil
     var city: String?
     var region: String?
     var country: String?
@@ -451,7 +463,9 @@ extension VibePlace {
             latitude: candidate.latitude,
             longitude: candidate.longitude,
             streetAddress: candidate.streetAddress,
-            category: candidate.category,
+            category: candidate.primaryCategory ?? candidate.category,
+            primaryCategory: candidate.primaryCategory ?? candidate.category,
+            providerCategory: candidate.providerCategory,
             city: candidate.city,
             region: candidate.region,
             country: candidate.country,
@@ -480,7 +494,15 @@ extension VibePlace {
         }
 
         if cleanAddressField(place.category) == nil {
-            place.category = cleanAddressField(candidate.category)
+            place.category = cleanAddressField(candidate.primaryCategory ?? candidate.category)
+        }
+
+        if cleanAddressField(place.primaryCategory) == nil {
+            place.primaryCategory = cleanAddressField(candidate.primaryCategory ?? candidate.category)
+        }
+
+        if cleanAddressField(place.providerCategory) == nil {
+            place.providerCategory = cleanAddressField(candidate.providerCategory)
         }
 
         if cleanAddressField(place.providerPlaceId) == nil {
@@ -524,7 +546,9 @@ extension VibePlace {
             latitude: latitude,
             longitude: longitude,
             streetAddress: streetAddress,
-            category: category,
+            category: primaryCategory ?? category,
+            primaryCategory: primaryCategory ?? category,
+            providerCategory: providerCategory,
             city: city,
             region: region,
             country: country,

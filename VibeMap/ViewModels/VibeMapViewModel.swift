@@ -23,6 +23,7 @@ final class VibeMapViewModel: ObservableObject {
     @Published private(set) var nearbyError: String?
     @Published private(set) var searchError: String?
     @Published var accountSignupPrompt: AccountSignupPrompt?
+    @Published private var accountSessionToken: String?
     @Published private var displayedAnnotationLayer: AnnotationLayer = .nearby
 
     let locationService: LocationService
@@ -33,6 +34,7 @@ final class VibeMapViewModel: ObservableObject {
     private let contributedPlaceIDsKey = "vibe-map.contributed-place-ids"
     private let accountPromptDismissedKey = "vibes-yall.account-prompt-dismissed"
     private let accountSessionTokenKey = "vibes-yall.account-session-token"
+    private let pendingRatingSubmissionsKey = "vibes-yall.pending-rating-submissions"
     private var visibleCenter = AppConfig.initialMapCenter
     private var visibleRadius = AppConfig.nearbyRadiusMeters
     private var activeMapTapRequestID: UUID?
@@ -43,10 +45,14 @@ final class VibeMapViewModel: ObservableObject {
     private var currentMapCellCacheKey: String?
     private var displayedNearbySignature = ""
     private var displayedMapCellSignature = ""
+    private var lastAccountStatusRefresh: Date?
     private var nearbyCache: [String: NearbyCacheEntry] = [:]
     private var nearbyCacheOrder: [String] = []
     private var mapCellCache: [String: MapCellCacheEntry] = [:]
     private var mapCellCacheOrder: [String] = []
+    private var hasRecordedAppOpen = false
+    private var lastTrackedSearchQuery: String?
+    private var pendingRatingSyncTask: Task<Void, Never>?
 
     private enum AnnotationLayer {
         case nearby
@@ -61,6 +67,19 @@ final class VibeMapViewModel: ObservableObject {
     private struct MapCellCacheEntry {
         var clusters: [MapCellCluster]
         var loadedAt: Date
+    }
+
+    private struct MapCellDisplayBucket: Hashable {
+        var x: Int
+        var y: Int
+    }
+
+    private struct PendingRatingSubmission: Codable, Identifiable, Equatable {
+        var id: UUID
+        var localPlaceID: String
+        var candidate: PlaceCandidate
+        var vibeTags: [VibeTag]
+        var createdAt: Date
     }
 
     var showsMapTapChoices: Bool {
@@ -81,10 +100,10 @@ final class VibeMapViewModel: ObservableObject {
 
     var visibleNearbyPlaceCount: Int {
         if displayedAnnotationLayer == .mapCells {
-            return visibleMapCellClusters.reduce(0) { $0 + $1.count }
+            return filteredMapCellClusters.reduce(0) { $0 + $1.count }
         }
 
-        return visibleNearbyPlaces.count
+        return visibleNearbyPlaces.count + visibleMapCellClusters.reduce(0) { $0 + $1.count }
     }
 
     var isShowingMapCellClusters: Bool {
@@ -92,10 +111,27 @@ final class VibeMapViewModel: ObservableObject {
     }
 
     var visibleMapCellClusters: [MapCellCluster] {
-        guard displayedAnnotationLayer == .mapCells else {
-            return []
-        }
+        let sortedClusters = sortedMapCellClusters(filteredMapCellClusters)
 
+        switch displayedAnnotationLayer {
+        case .mapCells:
+            let limit = min(AppConfig.maximumRenderedMapCellClusters, AppConfig.mapCellDisplayLimit(for: visibleRadius))
+            return geographicallyBalancedMapCellClusters(sortedClusters, limit: limit)
+        case .nearby:
+            guard AppConfig.shouldShowContinuityMapCells(for: visibleRadius) else {
+                return []
+            }
+
+            return Array(
+                sortedClusters
+                    .filter { isMapCellClusterInVisibleArea($0) }
+                    .filter { !isMapCellClusterRepresentedByNearbyPlaces($0) }
+                    .prefix(AppConfig.maximumContinuityMapCellClusters)
+            )
+        }
+    }
+
+    private var filteredMapCellClusters: [MapCellCluster] {
         guard !selectedVibeFilters.isEmpty else {
             return mapCellClusters
         }
@@ -137,11 +173,15 @@ final class VibeMapViewModel: ObservableObject {
         self.locationService = locationService
         self.identityService = identityService
         self.contributedPlaceIDs = Set(UserDefaults.standard.stringArray(forKey: contributedPlaceIDsKey) ?? [])
+        self.accountSessionToken = UserDefaults.standard.string(forKey: accountSessionTokenKey)
     }
 
     func start() async {
         locationService.requestAuthorizationAndLocation()
+        recordAppOpenIfNeeded()
         await loadAllowedVibes()
+        await refreshAccountStatus()
+        schedulePendingRatingSync()
         await loadNearby(center: visibleCenter)
     }
 
@@ -152,6 +192,30 @@ final class VibeMapViewModel: ObservableObject {
     func updateVisibleRegion(_ region: MKCoordinateRegion) {
         visibleCenter = region.center
         visibleRadius = AppConfig.nearbyRadius(for: region)
+    }
+
+    func previewCachedAnnotations(center: CLLocationCoordinate2D, radius: CLLocationDistance) {
+        let usesMapCells = AppConfig.shouldUseServerMapCells(for: radius)
+        let cellSize = AppConfig.mapCellSize(for: radius)
+        let deviceIDHash = radius <= AppConfig.personalizedNearbyRadiusMeters
+            ? identityService.deviceIDHash()
+            : nil
+        let cacheKey = usesMapCells
+            ? AppConfig.mapCellCacheKey(center: center, radius: radius, cellSize: cellSize)
+            : AppConfig.nearbyCacheKey(
+                center: center,
+                radius: radius,
+                includesDevice: deviceIDHash != nil
+            )
+
+        visibleCenter = center
+        visibleRadius = radius
+
+        if usesMapCells, let cachedMapCellEntry = mapCellCache[cacheKey] {
+            applyMapCellClusters(cachedMapCellEntry.clusters, cacheKey: cacheKey)
+        } else if !usesMapCells, let cachedNearbyEntry = nearbyCache[cacheKey] {
+            applyNearbyPlaces(cachedNearbyEntry.places, cacheKey: cacheKey)
+        }
     }
 
     func loadNearby(center: CLLocationCoordinate2D? = nil, radius: CLLocationDistance? = nil) async {
@@ -289,7 +353,9 @@ final class VibeMapViewModel: ObservableObject {
         clearMapTapChoices()
 
         do {
-            searchResults = try await searchService.search(query: query, near: visibleCenter)
+            let results = try await searchService.search(query: query, near: visibleCenter)
+            searchResults = results
+            trackSearchIfNeeded(query: query, resultCount: results.count)
         } catch is CancellationError {
             return
         } catch {
@@ -322,7 +388,20 @@ final class VibeMapViewModel: ObservableObject {
     }
 
     func selectSearchResult(_ result: PlaceSearchResult) async {
-        await select(result.candidate, opensRating: true)
+        let rank = filteredSearchResults.firstIndex(of: result).map { String($0 + 1) }
+        trackAnalytics(
+            "place_selected",
+            properties: analyticsPlaceProperties(
+                candidate: result.candidate,
+                place: result.vibedPlace,
+                source: "search",
+                extra: [
+                    "result_rank": rank,
+                    "has_community_vibes": result.hasCommunityVibes ? "true" : "false"
+                ]
+            )
+        )
+        await select(result.candidate, knownPlace: result.vibedPlace, opensRating: true)
     }
 
     func resolvePointOfInterestSelection(for selectedItem: MKMapItem) async {
@@ -353,7 +432,7 @@ final class VibeMapViewModel: ObservableObject {
         } catch {
             guard activeMapTapRequestID == requestID else { return }
             mapTapMatches = []
-            mapTapError = error.localizedDescription
+            mapTapError = "Could not load that place. Try searching its name."
         }
 
         isResolvingMapTap = false
@@ -394,10 +473,18 @@ final class VibeMapViewModel: ObservableObject {
     }
 
     func selectMapTapMatch(_ match: PlaceCandidateMatch) async {
+        trackAnalytics(
+            "place_selected",
+            properties: analyticsPlaceProperties(candidate: match.candidate, place: nil, source: "map_tap")
+        )
         await select(match.candidate, opensRating: true)
     }
 
     func selectNearbyPlace(_ place: VibePlace) {
+        trackAnalytics(
+            "place_selected",
+            properties: analyticsPlaceProperties(candidate: place.placeCandidate, place: place, source: "nearby_list")
+        )
         selectedPlace = place
         clearMapTapChoices()
         clearSearch()
@@ -405,6 +492,10 @@ final class VibeMapViewModel: ObservableObject {
     }
 
     func openRating(for place: VibePlace) {
+        trackAnalytics(
+            "rating_started",
+            properties: analyticsPlaceProperties(candidate: place.placeCandidate, place: place, source: "place_card")
+        )
         selectedPlace = place
         clearMapTapChoices()
         clearSearch()
@@ -447,6 +538,10 @@ final class VibeMapViewModel: ObservableObject {
         guard let selectedPlace else {
             return
         }
+        trackAnalytics(
+            "rating_started",
+            properties: analyticsPlaceProperties(candidate: selectedPlace.placeCandidate, place: selectedPlace, source: "selected_place")
+        )
         ratingDraft = RatingDraft(place: selectedPlace)
     }
 
@@ -464,24 +559,237 @@ final class VibeMapViewModel: ObservableObject {
             throw APIError.server("Pick a vibe first.")
         }
 
-        let syncedPlace = try await vibeService.upsertPlace(selectedPlace.placeCandidate)
-        if let refreshedPlace = try? await vibeService.fetchPlace(id: syncedPlace.id, deviceIdHash: identityService.deviceIDHash()) {
-            self.selectedPlace = refreshedPlace
-        } else {
-            self.selectedPlace = syncedPlace
+        let optimisticSubmission = optimisticRatingSubmission(
+            for: selectedPlace,
+            selectedTags: selectedTags
+        )
+        self.selectedPlace = optimisticSubmission.place
+        if var draft = ratingDraft, draft.place.id == optimisticSubmission.rating.placeId {
+            draft.place = optimisticSubmission.place
+            ratingDraft = draft
         }
-
-        let submission = try await vibeService.submitRating(
-            placeId: syncedPlace.id,
-            deviceIdHash: identityService.deviceIDHash(),
+        markContribution(for: optimisticSubmission.place)
+        invalidateAnnotationCaches()
+        upsertNearbyPlace(optimisticSubmission.place)
+        enqueuePendingRatingSubmission(
+            place: optimisticSubmission.place,
             vibeTags: selectedTags
         )
+        schedulePendingRatingSync()
+        return optimisticSubmission
+    }
 
-        self.selectedPlace = submission.place
-        markContribution(for: submission.place)
-        upsertNearbyPlace(submission.place)
+    private func optimisticRatingSubmission(
+        for place: VibePlace,
+        selectedTags: [VibeTag]
+    ) -> RatingSubmission {
+        let normalizedTags = VibeTag.normalizedSelection(selectedTags)
+        let rating = VibeRating(
+            id: "pending:\(UUID().uuidString)",
+            placeId: place.id,
+            score: VibeTag.score(for: normalizedTags),
+            vibeTag: normalizedTags[0],
+            vibeTags: normalizedTags,
+            createdAt: nil,
+            updatedAt: ISO8601DateFormatter().string(from: Date())
+        )
+
+        var optimisticPlace = place
+        optimisticPlace.myRating = rating
+        optimisticPlace.stats = optimisticStats(
+            for: place,
+            replacing: place.myRating,
+            with: rating
+        )
+
+        return RatingSubmission(
+            place: optimisticPlace,
+            rating: rating,
+            discovery: RatingDiscovery(wasFirstVibe: place.myRating == nil && place.vibeCount == 0)
+        )
+    }
+
+    private func optimisticStats(
+        for place: VibePlace,
+        replacing previousRating: VibeRating?,
+        with rating: VibeRating
+    ) -> PlaceStats {
+        let previousStats = place.stats ?? PlaceStats(ratingCount: 0, averageScore: 0, topVibeTag: nil, topVibes: nil)
+        let ratingCount = max(1, previousStats.ratingCount + (previousRating == nil ? 1 : 0))
+        let previousTotalScore = previousStats.averageScore * Double(max(previousStats.ratingCount, 0))
+        let adjustedTotalScore: Double
+        if let previousRating {
+            adjustedTotalScore = previousTotalScore - previousRating.score + rating.score
+        } else {
+            adjustedTotalScore = previousTotalScore + rating.score
+        }
+
+        let previousOrder = Dictionary(
+            uniqueKeysWithValues: VibeTag.bestToWorst(VibeTag.allCases).enumerated().map { ($0.element, $0.offset) }
+        )
+        var counts: [VibeTag: Int] = [:]
+        for breakdown in previousStats.visibleTopVibes {
+            counts[breakdown.vibeTag, default: 0] += breakdown.count
+        }
+        for tag in previousRating?.selectedVibeTags ?? [] {
+            counts[tag, default: 0] -= 1
+        }
+        for tag in rating.selectedVibeTags {
+            counts[tag, default: 0] += 1
+        }
+
+        let sortedTopVibes = counts
+            .filter { $0.value > 0 }
+            .sorted { lhs, rhs in
+                if lhs.value != rhs.value {
+                    return lhs.value > rhs.value
+                }
+                return (previousOrder[lhs.key] ?? Int.max) < (previousOrder[rhs.key] ?? Int.max)
+            }
+            .map { tag, count in
+                VibeBreakdown(
+                    vibeTag: tag,
+                    count: count,
+                    percentage: Int((Double(count) / Double(ratingCount) * 100).rounded())
+                )
+            }
+        let topVibes = sortedTopVibes
+            .filter { $0.vibeTag == rating.vibeTag } +
+            sortedTopVibes.filter { $0.vibeTag != rating.vibeTag }
+
+        return PlaceStats(
+            ratingCount: ratingCount,
+            averageScore: adjustedTotalScore / Double(ratingCount),
+            topVibeTag: rating.vibeTag,
+            topVibes: topVibes,
+            recentVibeCount: previousStats.recentVibeCount,
+            recentPositivePercentage: previousStats.recentPositivePercentage
+        )
+    }
+
+    private func enqueuePendingRatingSubmission(place: VibePlace, vibeTags: [VibeTag]) {
+        let pendingSubmission = PendingRatingSubmission(
+            id: UUID(),
+            localPlaceID: place.id,
+            candidate: place.placeCandidate,
+            vibeTags: vibeTags,
+            createdAt: Date()
+        )
+        var pendingSubmissions = loadPendingRatingSubmissions()
+        pendingSubmissions.removeAll {
+            $0.localPlaceID == pendingSubmission.localPlaceID ||
+                $0.candidate.id == pendingSubmission.candidate.id
+        }
+        pendingSubmissions.append(pendingSubmission)
+        savePendingRatingSubmissions(pendingSubmissions)
+    }
+
+    private func schedulePendingRatingSync() {
+        guard pendingRatingSyncTask == nil,
+              !loadPendingRatingSubmissions().isEmpty else {
+            return
+        }
+
+        pendingRatingSyncTask = Task { [weak self] in
+            await self?.syncPendingRatingSubmissions()
+        }
+    }
+
+    private func syncPendingRatingSubmissions() async {
+        var shouldContinueSyncing = true
+        defer {
+            pendingRatingSyncTask = nil
+            if shouldContinueSyncing, !loadPendingRatingSubmissions().isEmpty {
+                schedulePendingRatingSync()
+            }
+        }
+
+        while let pendingSubmission = loadPendingRatingSubmissions().first {
+            do {
+                let syncedPlace = try await vibeService.upsertPlace(pendingSubmission.candidate)
+                let submission = try await vibeService.submitRating(
+                    placeId: syncedPlace.id,
+                    deviceIdHash: identityService.deviceIDHash(),
+                    vibeTags: pendingSubmission.vibeTags
+                )
+                removePendingRatingSubmission(id: pendingSubmission.id)
+                await applySyncedRatingSubmission(
+                    submission,
+                    replacingLocalPlaceID: pendingSubmission.localPlaceID
+                )
+            } catch {
+                shouldContinueSyncing = false
+                alert = AppAlert(
+                    title: "Still saving",
+                    message: "Your vibe is saved on this device and will retry when the connection improves."
+                )
+                return
+            }
+        }
+    }
+
+    private func applySyncedRatingSubmission(
+        _ submission: RatingSubmission,
+        replacingLocalPlaceID localPlaceID: String
+    ) async {
+        let localPlace = selectedPlace?.id == localPlaceID
+            ? selectedPlace
+            : nearbyPlaces.first { $0.id == localPlaceID }
+        let syncedPlace = localPlace.map { submission.place.preservingInteraction(from: $0) } ?? submission.place
+
+        if localPlaceID != syncedPlace.id {
+            contributedPlaceIDs.remove(localPlaceID)
+            UserDefaults.standard.set(Array(contributedPlaceIDs), forKey: contributedPlaceIDsKey)
+        }
+
+        invalidateAnnotationCaches()
+        applyPlaceUpdate(syncedPlace, replacing: localPlaceID)
+        if localPlaceID != syncedPlace.id {
+            nearbyPlaces.removeAll { $0.id == localPlaceID }
+            removeCachedPlace(id: localPlaceID)
+        }
+        markContribution(for: syncedPlace)
+        upsertNearbyPlace(syncedPlace)
         shouldCheckAccountAfterRating = true
-        return submission
+
+        if ratingDraft == nil {
+            await maybeOfferAccountSignup()
+        }
+    }
+
+    private func loadPendingRatingSubmissions() -> [PendingRatingSubmission] {
+        guard let data = UserDefaults.standard.data(forKey: pendingRatingSubmissionsKey),
+              let submissions = try? JSONDecoder().decode([PendingRatingSubmission].self, from: data) else {
+            return []
+        }
+
+        return submissions.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private func savePendingRatingSubmissions(_ submissions: [PendingRatingSubmission]) {
+        guard !submissions.isEmpty else {
+            UserDefaults.standard.removeObject(forKey: pendingRatingSubmissionsKey)
+            return
+        }
+
+        if let data = try? JSONEncoder().encode(submissions) {
+            UserDefaults.standard.set(data, forKey: pendingRatingSubmissionsKey)
+        }
+    }
+
+    private func removePendingRatingSubmission(id: UUID) {
+        var submissions = loadPendingRatingSubmissions()
+        submissions.removeAll { $0.id == id }
+        savePendingRatingSubmissions(submissions)
+    }
+
+    private func invalidateAnnotationCaches() {
+        nearbyCache.removeAll()
+        nearbyCacheOrder.removeAll()
+        mapCellCache.removeAll()
+        mapCellCacheOrder.removeAll()
+        currentNearbyCacheKey = nil
+        currentMapCellCacheKey = nil
     }
 
     func dismissAccountSignupPrompt() {
@@ -490,7 +798,22 @@ final class VibeMapViewModel: ObservableObject {
     }
 
     var hasConfirmedAccount: Bool {
-        UserDefaults.standard.string(forKey: accountSessionTokenKey) != nil
+        accountSessionToken != nil
+    }
+
+    func refreshAccountStatusOnActivation() {
+        schedulePendingRatingSync()
+
+        guard accountSessionToken == nil else { return }
+        let now = Date()
+        if let lastAccountStatusRefresh, now.timeIntervalSince(lastAccountStatusRefresh) < 4 {
+            return
+        }
+
+        lastAccountStatusRefresh = now
+        Task {
+            await refreshAccountStatus()
+        }
     }
 
     func requestAccountSignup(email: String) async throws -> AccountSignupResponse {
@@ -498,7 +821,47 @@ final class VibeMapViewModel: ObservableObject {
             email: email,
             deviceIdHash: identityService.deviceIDHash()
         )
+        trackAnalytics(
+            "account_signup_requested",
+            properties: [
+                "status": response.status,
+                "eligible": response.account.eligible ? "true" : "false",
+                "email_sent": response.emailSent ? "true" : "false"
+            ]
+        )
+        if let sessionToken = response.sessionToken ?? response.account.sessionToken {
+            saveAccountSessionToken(sessionToken)
+        }
         return response
+    }
+
+    func requestAccountLogin(email: String) async throws -> AccountLoginResponse {
+        let response = try await vibeService.requestAccountLogin(email: email)
+        trackAnalytics(
+            "account_login_requested",
+            properties: [
+                "status": response.status,
+                "email_sent": response.emailSent ? "true" : "false"
+            ]
+        )
+        return response
+    }
+
+    func requestAccountLogout() async {
+        do {
+            _ = try await vibeService.requestAccountLogout()
+            alert = AppAlert(title: "Logged out", message: "You can keep using VIBES Y'ALL anonymously on this device.")
+        } catch {
+            alert = AppAlert(
+                title: "Logged out locally",
+                message: "The server session could not be reached, but this device is no longer using the account session."
+            )
+        }
+
+        clearAccountSessionToken()
+        trackAnalytics("account_logout")
+        UserDefaults.standard.set(true, forKey: accountPromptDismissedKey)
+        accountSignupPrompt = nil
     }
 
     func presentAccountSignupFromMenu() async {
@@ -506,7 +869,22 @@ final class VibeMapViewModel: ObservableObject {
 
         do {
             let eligibility = try await vibeService.fetchAccountEligibility(deviceIdHash: identityService.deviceIDHash())
-            if eligibility.profile?.emailVerified == true || hasConfirmedAccount {
+            if let sessionToken = eligibility.sessionToken {
+                saveAccountSessionToken(sessionToken)
+                alert = AppAlert(
+                    title: "Account saved",
+                    message: "Your confirmed account is active on this device."
+                )
+                return
+            }
+
+            if eligibility.profile?.emailVerified == true {
+                UserDefaults.standard.set(false, forKey: accountPromptDismissedKey)
+                accountSignupPrompt = AccountSignupPrompt(eligibility: eligibility)
+                return
+            }
+
+            if hasConfirmedAccount {
                 alert = AppAlert(
                     title: "Account saved",
                     message: "Your confirmed account is active on this device."
@@ -534,9 +912,16 @@ final class VibeMapViewModel: ObservableObject {
             email: email,
             deviceIdHash: identityService.deviceIDHash()
         )
-        UserDefaults.standard.removeObject(forKey: accountSessionTokenKey)
+        clearAccountSessionToken()
         UserDefaults.standard.set(false, forKey: accountPromptDismissedKey)
         accountSignupPrompt = nil
+        trackAnalytics(
+            "account_delete_requested",
+            properties: [
+                "status": response.status,
+                "deleted": response.deleted ? "true" : "false"
+            ]
+        )
         alert = AppAlert(title: "Account deleted", message: response.message)
         return response
     }
@@ -551,23 +936,21 @@ final class VibeMapViewModel: ObservableObject {
             return
         }
 
-        UserDefaults.standard.set(session, forKey: accountSessionTokenKey)
-        UserDefaults.standard.set(false, forKey: accountPromptDismissedKey)
-        accountSignupPrompt = nil
+        saveAccountSessionToken(session)
         alert = AppAlert(
             title: "Account confirmed",
             message: "Your past and future vibes can now stay tied to your account."
         )
     }
 
-    private func select(_ candidate: PlaceCandidate, opensRating: Bool = false) async {
+    private func select(_ candidate: PlaceCandidate, knownPlace: VibePlace? = nil, opensRating: Bool = false) async {
         isSelectingPlace = true
         defer { isSelectingPlace = false }
 
         clearSearch()
         clearMapTapChoices()
 
-        let place = (existingNearbyPlace(for: candidate)?.enriched(with: candidate)) ?? VibePlace(candidate: candidate)
+        let place = (knownPlace ?? existingNearbyPlace(for: candidate))?.enriched(with: candidate) ?? VibePlace(candidate: candidate)
         selectedPlace = place
         if place.myRating != nil {
             markContribution(for: place)
@@ -575,9 +958,95 @@ final class VibeMapViewModel: ObservableObject {
 
         if opensRating {
             ratingDraft = RatingDraft(place: place)
+            trackAnalytics(
+                "rating_started",
+                properties: analyticsPlaceProperties(candidate: candidate, place: place, source: "selection")
+            )
         }
 
         persistEnrichedPlaceIfUseful(place, sourceCandidate: candidate)
+    }
+
+    private func recordAppOpenIfNeeded() {
+        guard !hasRecordedAppOpen else { return }
+        hasRecordedAppOpen = true
+        trackAnalytics(
+            "app_open",
+            properties: [
+                "has_account": accountSessionToken == nil ? "false" : "true"
+            ]
+        )
+    }
+
+    private func trackSearchIfNeeded(query: String, resultCount: Int) {
+        let normalizedQuery = query
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard normalizedQuery.count >= 2,
+              normalizedQuery != lastTrackedSearchQuery else {
+            return
+        }
+
+        lastTrackedSearchQuery = normalizedQuery
+        trackAnalytics(
+            "search_performed",
+            properties: [
+                "query_length": String(normalizedQuery.count),
+                "result_count": String(resultCount),
+                "visible_radius_meters": String(Int(visibleRadius.rounded())),
+                "has_active_filter": hasActiveVibeFilters ? "true" : "false"
+            ]
+        )
+    }
+
+    private func trackAnalytics(_ name: String, properties: [String: String] = [:]) {
+        let deviceIDHash = identityService.deviceIDHash()
+        Task {
+            await vibeService.recordAnalyticsEvent(
+                name: name,
+                deviceIdHash: deviceIDHash,
+                properties: properties
+            )
+        }
+    }
+
+    private func analyticsPlaceProperties(
+        candidate: PlaceCandidate,
+        place: VibePlace?,
+        source: String,
+        extra: [String: String?] = [:]
+    ) -> [String: String] {
+        var properties: [String: String] = [
+            "source": source,
+            "provider": candidate.provider,
+            "has_provider_place_id": candidate.providerPlaceId?.isEmpty == false ? "true" : "false",
+            "has_community_vibes": (place?.vibeCount ?? 0) > 0 ? "true" : "false"
+        ]
+
+        if let place {
+            properties["place_id"] = place.id
+            properties["vibe_count"] = String(place.vibeCount)
+            if let topVibe = place.stats?.visibleTopVibes.first?.vibeTag {
+                properties["top_vibe"] = topVibe.rawValue
+            }
+        }
+
+        if let category = (candidate.primaryCategory ?? candidate.category)?.trimmingCharacters(in: .whitespacesAndNewlines), !category.isEmpty {
+            properties["category"] = category
+            properties["primary_category"] = category
+        }
+
+        if let providerCategory = candidate.providerCategory?.trimmingCharacters(in: .whitespacesAndNewlines), !providerCategory.isEmpty {
+            properties["provider_category"] = providerCategory
+        }
+
+        for (key, value) in extra {
+            if let value, !value.isEmpty {
+                properties[key] = value
+            }
+        }
+
+        return properties
     }
 
     private func loadAllowedVibes() async {
@@ -590,13 +1059,18 @@ final class VibeMapViewModel: ObservableObject {
 
     private func maybeOfferAccountSignup() async {
         guard accountSignupPrompt == nil,
-              UserDefaults.standard.string(forKey: accountSessionTokenKey) == nil,
+              accountSessionToken == nil,
               !UserDefaults.standard.bool(forKey: accountPromptDismissedKey) else {
             return
         }
 
         do {
             let eligibility = try await vibeService.fetchAccountEligibility(deviceIdHash: identityService.deviceIDHash())
+            if let sessionToken = eligibility.sessionToken {
+                saveAccountSessionToken(sessionToken)
+                return
+            }
+
             guard eligibility.eligible,
                   eligibility.profile?.emailVerified != true else {
                 return
@@ -606,6 +1080,32 @@ final class VibeMapViewModel: ObservableObject {
         } catch {
             return
         }
+    }
+
+    private func refreshAccountStatus() async {
+        guard accountSessionToken == nil else { return }
+
+        do {
+            let eligibility = try await vibeService.fetchAccountEligibility(deviceIdHash: identityService.deviceIDHash())
+            if let sessionToken = eligibility.sessionToken {
+                saveAccountSessionToken(sessionToken)
+            }
+        } catch {
+            return
+        }
+    }
+
+    private func saveAccountSessionToken(_ sessionToken: String) {
+        guard !sessionToken.isEmpty else { return }
+        UserDefaults.standard.set(sessionToken, forKey: accountSessionTokenKey)
+        UserDefaults.standard.set(false, forKey: accountPromptDismissedKey)
+        accountSessionToken = sessionToken
+        accountSignupPrompt = nil
+    }
+
+    private func clearAccountSessionToken() {
+        UserDefaults.standard.removeObject(forKey: accountSessionTokenKey)
+        accountSessionToken = nil
     }
 
     private func applyNearbyPlaces(_ places: [VibePlace], cacheKey: String? = nil) {
@@ -624,14 +1124,9 @@ final class VibeMapViewModel: ObservableObject {
         if displayedAnnotationLayer != .nearby {
             displayedAnnotationLayer = .nearby
         }
-        if !mapCellClusters.isEmpty {
-            mapCellClusters = []
-        }
-        displayedMapCellSignature = ""
         if let cacheKey {
             currentNearbyCacheKey = cacheKey
         }
-        currentMapCellCacheKey = nil
         syncContributedPlaces(from: places)
         enrichNearbyAddressesIfNeeded(places)
     }
@@ -713,6 +1208,132 @@ final class VibeMapViewModel: ObservableObject {
         while mapCellCacheOrder.count > AppConfig.mapCellMemoryCacheLimit {
             let expiredKey = mapCellCacheOrder.removeFirst()
             mapCellCache.removeValue(forKey: expiredKey)
+        }
+    }
+
+    private func sortedMapCellClusters(_ clusters: [MapCellCluster]) -> [MapCellCluster] {
+        clusters.sorted { lhs, rhs in
+            isMapCellClusterHigherPriority(lhs, than: rhs)
+        }
+    }
+
+    private func geographicallyBalancedMapCellClusters(_ sortedClusters: [MapCellCluster], limit: Int) -> [MapCellCluster] {
+        guard limit > 0 else { return [] }
+        guard sortedClusters.count > limit else { return sortedClusters }
+
+        let representatives = mapCellBucketRepresentatives(from: sortedClusters)
+        let coverageLimit = min(limit, max(12, limit / 2), representatives.count)
+        var selected: [MapCellCluster] = []
+        var selectedIDs = Set<String>()
+
+        func appendCluster(_ cluster: MapCellCluster) {
+            guard selected.count < limit, !selectedIDs.contains(cluster.id) else {
+                return
+            }
+
+            selected.append(cluster)
+            selectedIDs.insert(cluster.id)
+        }
+
+        if let firstRepresentative = representatives.first {
+            appendCluster(firstRepresentative)
+        }
+
+        while selected.count < coverageLimit {
+            let nextCluster = representatives
+                .filter { !selectedIDs.contains($0.id) }
+                .max { lhs, rhs in
+                    let lhsDistance = minimumDistance(from: lhs, to: selected)
+                    let rhsDistance = minimumDistance(from: rhs, to: selected)
+                    if abs(lhsDistance - rhsDistance) > 1 {
+                        return lhsDistance < rhsDistance
+                    }
+                    return isMapCellClusterHigherPriority(rhs, than: lhs)
+                }
+
+            guard let nextCluster else {
+                break
+            }
+
+            appendCluster(nextCluster)
+        }
+
+        for cluster in sortedClusters {
+            appendCluster(cluster)
+            if selected.count >= limit {
+                break
+            }
+        }
+
+        return selected
+    }
+
+    private func mapCellBucketRepresentatives(from sortedClusters: [MapCellCluster]) -> [MapCellCluster] {
+        let bucketSizeMeters = min(max(visibleRadius / 5, 110_000), 420_000)
+        let latitudeStep = bucketSizeMeters / 111_320
+        let longitudeStep = bucketSizeMeters / max(111_320 * cos((visibleCenter.latitude * .pi) / 180), 1)
+        var representatives: [MapCellDisplayBucket: MapCellCluster] = [:]
+
+        for cluster in sortedClusters {
+            let bucket = MapCellDisplayBucket(
+                x: Int(floor(cluster.longitude / longitudeStep)),
+                y: Int(floor(cluster.latitude / latitudeStep))
+            )
+
+            if representatives[bucket] == nil {
+                representatives[bucket] = cluster
+            }
+        }
+
+        return representatives.values.sorted { lhs, rhs in
+            isMapCellClusterHigherPriority(lhs, than: rhs)
+        }
+    }
+
+    private func minimumDistance(from cluster: MapCellCluster, to selectedClusters: [MapCellCluster]) -> CLLocationDistance {
+        guard !selectedClusters.isEmpty else {
+            return .greatestFiniteMagnitude
+        }
+
+        let clusterLocation = CLLocation(latitude: cluster.latitude, longitude: cluster.longitude)
+        return selectedClusters
+            .map { CLLocation(latitude: $0.latitude, longitude: $0.longitude).distance(from: clusterLocation) }
+            .min() ?? .greatestFiniteMagnitude
+    }
+
+    private func isMapCellClusterHigherPriority(_ lhs: MapCellCluster, than rhs: MapCellCluster) -> Bool {
+        if lhs.count == rhs.count {
+            if lhs.totalVibes == rhs.totalVibes {
+                return lhs.id < rhs.id
+            }
+            return lhs.totalVibes > rhs.totalVibes
+        }
+        return lhs.count > rhs.count
+    }
+
+    private func isMapCellClusterInVisibleArea(_ cluster: MapCellCluster) -> Bool {
+        let clusterLocation = CLLocation(latitude: cluster.latitude, longitude: cluster.longitude)
+        let visibleLocation = CLLocation(latitude: visibleCenter.latitude, longitude: visibleCenter.longitude)
+        return clusterLocation.distance(from: visibleLocation) <= visibleRadius * 1.08
+    }
+
+    private func isMapCellClusterRepresentedByNearbyPlaces(_ cluster: MapCellCluster) -> Bool {
+        let clusterLocation = CLLocation(latitude: cluster.latitude, longitude: cluster.longitude)
+        let matchDistance = AppConfig.mapCellContinuityMatchDistance(for: cluster)
+        let clusterVibe = cluster.displayVibe
+
+        return visibleNearbyPlaces.contains { place in
+            let distance = CLLocation(latitude: place.latitude, longitude: place.longitude)
+                .distance(from: clusterLocation)
+            guard distance <= matchDistance else {
+                return false
+            }
+
+            guard let clusterVibe else {
+                return true
+            }
+
+            return place.matchesAnyVibe(in: [clusterVibe])
         }
     }
 
@@ -909,7 +1530,80 @@ final class VibeMapViewModel: ObservableObject {
             seenCandidateIDs.insert(candidate.id)
         }
 
-        return results + plainCandidates
+        return sortedSearchResults(results + plainCandidates, query: query)
+    }
+
+    private func sortedSearchResults(_ results: [PlaceSearchResult], query: String) -> [PlaceSearchResult] {
+        results.sorted { lhs, rhs in
+            if lhs.hasCommunityVibes != rhs.hasCommunityVibes {
+                return lhs.hasCommunityVibes
+            }
+
+            let lhsRelevance = Self.searchRelevance(for: lhs, query: query)
+            let rhsRelevance = Self.searchRelevance(for: rhs, query: query)
+            if lhsRelevance != rhsRelevance {
+                return lhsRelevance < rhsRelevance
+            }
+
+            let lhsDistance = distanceFromVisibleCenter(to: lhs)
+            let rhsDistance = distanceFromVisibleCenter(to: rhs)
+            if abs(lhsDistance - rhsDistance) > 25 {
+                return lhsDistance < rhsDistance
+            }
+
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private func distanceFromVisibleCenter(to result: PlaceSearchResult) -> CLLocationDistance {
+        if let distanceMeters = result.vibedPlace?.distanceMeters ?? result.candidate.distanceMeters {
+            return distanceMeters
+        }
+
+        let coordinate = result.vibedPlace?.coordinate ?? result.candidate.coordinate
+        return CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            .distance(from: CLLocation(latitude: visibleCenter.latitude, longitude: visibleCenter.longitude))
+    }
+
+    private static func searchRelevance(for result: PlaceSearchResult, query: String) -> Int {
+        let normalizedQuery = query.normalizedForSearch()
+        guard !normalizedQuery.isEmpty else {
+            return 5
+        }
+
+        let queryTokens = normalizedQuery
+            .split(separator: " ")
+            .map(String.init)
+        let normalizedName = result.name.normalizedForSearch()
+        let searchableText = [
+            result.name,
+            result.locationLine,
+            result.candidate.category,
+            result.candidate.primaryCategory,
+            result.candidate.providerCategory,
+            result.topVibe?.vibeTag.rawValue
+        ]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .normalizedForSearch()
+
+        if normalizedName == normalizedQuery {
+            return 0
+        }
+
+        if normalizedName.hasPrefix(normalizedQuery) || normalizedName.contains(normalizedQuery) {
+            return 1
+        }
+
+        if queryTokens.allSatisfy({ normalizedName.contains($0) }) {
+            return 2
+        }
+
+        if queryTokens.allSatisfy({ searchableText.contains($0) }) {
+            return 3
+        }
+
+        return 4
     }
 
     private func existingNearbyPlace(for candidate: PlaceCandidate) -> VibePlace? {
@@ -927,15 +1621,48 @@ final class VibeMapViewModel: ObservableObject {
 
         let candidateName = Self.normalizedPlaceName(candidate.name)
         let candidateLocation = CLLocation(latitude: candidate.latitude, longitude: candidate.longitude)
+        let candidateStreet = Self.normalizedPlaceAddress(candidate.streetAddress)
 
         return nearbyPlaces
-            .compactMap { place -> (place: VibePlace, distance: CLLocationDistance)? in
-                guard Self.normalizedPlaceName(place.name) == candidateName else { return nil }
+            .compactMap { place -> (place: VibePlace, distance: CLLocationDistance, score: Int)? in
+                let placeName = Self.normalizedPlaceName(place.name)
+                let exactNameMatch = placeName == candidateName
+                let containedNameMatch = !placeName.isEmpty &&
+                    !candidateName.isEmpty &&
+                    (placeName.contains(candidateName) || candidateName.contains(placeName))
+
+                guard exactNameMatch || containedNameMatch else { return nil }
+
                 let distance = candidateLocation.distance(from: CLLocation(latitude: place.latitude, longitude: place.longitude))
-                guard distance <= 35 else { return nil }
-                return (place, distance)
+                let placeStreet = Self.normalizedPlaceAddress(place.streetAddress)
+                let addressMatch = !candidateStreet.isEmpty &&
+                    !placeStreet.isEmpty &&
+                    (candidateStreet == placeStreet || candidateStreet.contains(placeStreet) || placeStreet.contains(candidateStreet))
+
+                let isReliableMatch =
+                    addressMatch && distance <= 700 ||
+                    exactNameMatch && distance <= 260 ||
+                    containedNameMatch && distance <= 120
+
+                guard isReliableMatch else { return nil }
+
+                let score: Int
+                if addressMatch {
+                    score = exactNameMatch ? 0 : 1
+                } else if exactNameMatch {
+                    score = 2
+                } else {
+                    score = 3
+                }
+
+                return (place, distance, score)
             }
-            .sorted { $0.distance < $1.distance }
+            .sorted {
+                if $0.score != $1.score {
+                    return $0.score < $1.score
+                }
+                return $0.distance < $1.distance
+            }
             .first?
             .place
     }
@@ -943,6 +1670,21 @@ final class VibeMapViewModel: ObservableObject {
     private static func normalizedPlaceName(_ name: String) -> String {
         name
             .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private static func normalizedPlaceAddress(_ address: String?) -> String {
+        guard let address else { return "" }
+
+        return address
+            .lowercased()
+            .replacingOccurrences(of: "street", with: "st")
+            .replacingOccurrences(of: "avenue", with: "ave")
+            .replacingOccurrences(of: "boulevard", with: "blvd")
+            .replacingOccurrences(of: "road", with: "rd")
+            .replacingOccurrences(of: "drive", with: "dr")
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
@@ -959,6 +1701,8 @@ private extension VibePlace {
         let searchableText = [
             name,
             category,
+            primaryCategory,
+            providerCategory,
             streetAddress,
             city,
             region,
