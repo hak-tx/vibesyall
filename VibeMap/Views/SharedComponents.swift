@@ -369,8 +369,10 @@ struct AddressDirectionsLink: View {
         }
         .buttonStyle(.plain)
         .confirmationDialog("Learn More", isPresented: $isChoosingMapApp, titleVisibility: .visible) {
-            Button("Apple Maps") {
-                MapPlaceLauncher.openAppleMaps(for: place)
+            if !place.isGoogleProviderPlace {
+                Button("Apple Maps") {
+                    MapPlaceLauncher.openAppleMaps(for: place)
+                }
             }
 
             Button("Google Maps") {
@@ -458,7 +460,7 @@ private enum MapPlaceLauncher {
             URLQueryItem(name: "query", value: place.mapPlaceSearchQuery)
         ]
 
-        if place.provider?.localizedCaseInsensitiveContains("google") == true,
+        if place.isGoogleProviderPlace,
            let providerPlaceId = place.providerPlaceId,
            !providerPlaceId.isEmpty {
             queryItems.append(URLQueryItem(name: "query_place_id", value: providerPlaceId))

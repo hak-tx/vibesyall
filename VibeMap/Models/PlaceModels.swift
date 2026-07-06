@@ -175,6 +175,10 @@ struct VibePlace: Identifiable, Codable, Hashable {
         cleanAddressField(streetAddress) != nil
     }
 
+    var isGoogleProviderPlace: Bool {
+        provider?.localizedCaseInsensitiveContains("google") == true
+    }
+
     var localityLine: String {
         [city, region].compactMap { $0 }.joined(separator: ", ")
     }
