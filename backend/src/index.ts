@@ -10,6 +10,8 @@ const MAX_MAP_CELL_QUERY_ROWS = 8_000;
 const MAX_MAP_CELL_RESPONSE_CELLS = 260;
 const MIN_MAP_CELL_SIZE_METERS = 10_000;
 const MAX_MAP_CELL_SIZE_METERS = 300_000;
+const MAX_PROVIDER_SEARCH_RESULTS = 8;
+const GOOGLE_PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText";
 const CACHE_VERSION = "2026-07-05-primary-display-vibes-1";
 const LIVE_APP_STORE_URL = "https://apps.apple.com/us/app/vibes-yall/id6783989332?mt=8";
 const CACHE_TTL_SECONDS = {
@@ -242,6 +244,59 @@ type PlaceInput = {
   country?: unknown;
 };
 
+type ProviderPlaceCandidate = {
+  provider: string;
+  provider_place_id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  street_address: string | null;
+  category: string | null;
+  primary_category: string | null;
+  provider_category: string | null;
+  city: string | null;
+  region: string | null;
+  country: string | null;
+  distance_meters: number | null;
+};
+
+type GooglePlaceTextSearchRequest = {
+  textQuery: string;
+  maxResultCount: number;
+  languageCode?: string;
+  regionCode?: string;
+  locationBias?: {
+    circle: {
+      center: {
+        latitude: number;
+        longitude: number;
+      };
+      radius: number;
+    };
+  };
+};
+
+type GooglePlaceTextSearchResponse = {
+  places?: GooglePlace[];
+};
+
+type GooglePlace = {
+  id?: string;
+  displayName?: {
+    text?: string;
+  };
+  formattedAddress?: string;
+  location?: {
+    latitude?: number;
+    longitude?: number;
+  };
+  primaryType?: string;
+  primaryTypeDisplayName?: {
+    text?: string;
+  };
+  types?: string[];
+};
+
 type VibeInput = {
   place_id?: unknown;
   placeId?: unknown;
@@ -364,6 +419,7 @@ type RuntimeEnv = Env & {
   CF_ACCESS_TEAM_DOMAIN?: string;
   CF_ACCESS_AUD?: string;
   ANALYTICS_SECRET?: string;
+  GOOGLE_PLACES_API_KEY?: string;
   SIGNUP_EMAIL?: AccountEmailSender;
 };
 
@@ -635,6 +691,10 @@ export default {
 
       if (request.method === "GET" && path === "/places/map-cells") {
         return cachedGET(request, ctx, CACHE_TTL_SECONDS.mapCells, () => getPlaceMapCells(url, env));
+      }
+
+      if (request.method === "GET" && path === "/places/provider-search") {
+        return searchProviderPlaces(url, env);
       }
 
       if (request.method === "POST" && path === "/places") {
@@ -3680,6 +3740,244 @@ async function getPlace(id: string, request: Request, env: Env): Promise<Respons
   return json({ place: await serializePlace(place, undefined, env, deviceIDHash) });
 }
 
+async function searchProviderPlaces(url: URL, env: Env): Promise<Response> {
+  const provider = cleanString(url.searchParams.get("provider")) ?? "google";
+  const query = cleanString(url.searchParams.get("q") ?? url.searchParams.get("query"));
+  const latitude = numberParam(url, "lat");
+  const longitude = numberParam(url, "lng");
+  const rawLimit = numberParam(url, "limit") ?? MAX_PROVIDER_SEARCH_RESULTS;
+  const limit = Math.max(1, Math.min(Math.floor(rawLimit), MAX_PROVIDER_SEARCH_RESULTS));
+
+  if (!query || query.length < 2) {
+    return json({ candidates: [], provider: "google_places", enabled: true });
+  }
+
+  if (provider !== "google" && provider !== "google_places") {
+    return json({ error: "provider must be google." }, { status: 400 });
+  }
+
+  if ((latitude === null) !== (longitude === null)) {
+    return json({ error: "lat and lng must be supplied together." }, { status: 400 });
+  }
+
+  if (latitude !== null && longitude !== null && !isValidCoordinate(latitude, longitude)) {
+    return json({ error: "lat or lng is out of range." }, { status: 400 });
+  }
+
+  const apiKey = cleanString((env as RuntimeEnv).GOOGLE_PLACES_API_KEY);
+  if (!apiKey) {
+    return json({ candidates: [], provider: "google_places", enabled: false });
+  }
+
+  const body: GooglePlaceTextSearchRequest = {
+    textQuery: query,
+    maxResultCount: limit,
+    languageCode: "en",
+    regionCode: "US",
+  };
+
+  if (latitude !== null && longitude !== null) {
+    body.locationBias = {
+      circle: {
+        center: {
+          latitude,
+          longitude,
+        },
+        radius: 50_000,
+      },
+    };
+  }
+
+  const response = await fetch(GOOGLE_PLACES_TEXT_SEARCH_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": apiKey,
+      "X-Goog-FieldMask":
+        "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.primaryTypeDisplayName,places.types",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    console.warn(
+      JSON.stringify({
+        message: "Google provider search failed",
+        status: response.status,
+        statusText: response.statusText,
+      })
+    );
+    return json({ candidates: [], provider: "google_places", enabled: true, degraded: true });
+  }
+
+  const data = (await response.json()) as GooglePlaceTextSearchResponse;
+  const candidates = (data.places ?? [])
+    .map((place) => googlePlaceCandidate(place, latitude, longitude))
+    .filter((candidate): candidate is ProviderPlaceCandidate => candidate !== null)
+    .slice(0, limit);
+
+  return json({ candidates, provider: "google_places", enabled: true });
+}
+
+function googlePlaceCandidate(place: GooglePlace, latitude: number | null, longitude: number | null): ProviderPlaceCandidate | null {
+  const providerPlaceID = cleanString(place.id);
+  const name = cleanString(place.displayName?.text);
+  const placeLatitude = numberValue(place.location?.latitude);
+  const placeLongitude = numberValue(place.location?.longitude);
+
+  if (!providerPlaceID || !name || placeLatitude === null || placeLongitude === null) {
+    return null;
+  }
+
+  const providerCategory = googleProviderCategory(place);
+  const primaryCategory = googlePrimaryCategory(place, providerCategory);
+
+  return {
+    provider: "google_places",
+    provider_place_id: providerPlaceID,
+    name,
+    latitude: placeLatitude,
+    longitude: placeLongitude,
+    street_address: cleanString(place.formattedAddress),
+    category: primaryCategory,
+    primary_category: primaryCategory,
+    provider_category: providerCategory,
+    city: null,
+    region: null,
+    country: null,
+    distance_meters:
+      latitude !== null && longitude !== null ? distanceMeters(latitude, longitude, placeLatitude, placeLongitude) : null,
+  };
+}
+
+function googleProviderCategory(place: GooglePlace): string | null {
+  const displayName = cleanString(place.primaryTypeDisplayName?.text);
+  if (displayName) {
+    return displayName;
+  }
+
+  const primaryType = cleanString(place.primaryType) ?? cleanString(place.types?.[0]);
+  return primaryType ? prettifyProviderType(primaryType) : null;
+}
+
+function googlePrimaryCategory(place: GooglePlace, providerCategory: string | null): string | null {
+  const types = [place.primaryType, ...(place.types ?? [])]
+    .map((value) => cleanString(value)?.toLowerCase())
+    .filter((value): value is string => Boolean(value));
+  const categoryText = providerCategory?.toLowerCase() ?? "";
+
+  if (types.some((type) => type.includes("restaurant") || FOOD_PROVIDER_TYPES.has(type)) || categoryText.includes("restaurant")) {
+    return "Restaurant";
+  }
+  if (types.some((type) => BAR_PROVIDER_TYPES.has(type)) || categoryText.includes("bar")) {
+    return "Bar";
+  }
+  if (types.some((type) => ENTERTAINMENT_PROVIDER_TYPES.has(type))) {
+    return "Entertainment";
+  }
+  if (types.some((type) => MUSEUM_PROVIDER_TYPES.has(type))) {
+    return "Museum";
+  }
+  if (types.some((type) => PARK_PROVIDER_TYPES.has(type))) {
+    return "Park";
+  }
+  if (types.some((type) => SHOP_PROVIDER_TYPES.has(type))) {
+    return "Shop";
+  }
+  if (types.some((type) => HEALTH_PROVIDER_TYPES.has(type))) {
+    return "Health";
+  }
+  if (types.some((type) => TRANSIT_PROVIDER_TYPES.has(type))) {
+    return "Transit";
+  }
+  if (types.some((type) => GAS_PROVIDER_TYPES.has(type))) {
+    return "Gas";
+  }
+  if (types.some((type) => type === "lodging" || type === "hotel" || type === "motel")) {
+    return "Hotel";
+  }
+  if (types.some((type) => type === "school" || type === "university")) {
+    return "School";
+  }
+  if (types.some((type) => type === "gym" || type === "fitness_center")) {
+    return "Fitness";
+  }
+  if (types.some((type) => type === "stadium")) {
+    return "Stadium";
+  }
+  if (types.some((type) => type === "library")) {
+    return "Library";
+  }
+  if (types.some((type) => type === "bank" || type === "atm")) {
+    return "Bank";
+  }
+  if (types.some((type) => type === "parking")) {
+    return "Parking";
+  }
+
+  return providerCategory && providerCategory !== "Point Of Interest" ? providerCategory : null;
+}
+
+const FOOD_PROVIDER_TYPES = new Set([
+  "bakery",
+  "barbecue_restaurant",
+  "cafe",
+  "coffee_shop",
+  "dessert_shop",
+  "diner",
+  "fast_food_restaurant",
+  "food",
+  "hamburger_restaurant",
+  "ice_cream_shop",
+  "meal_delivery",
+  "meal_takeaway",
+  "pizza_restaurant",
+]);
+
+const BAR_PROVIDER_TYPES = new Set(["bar", "night_club", "pub", "wine_bar"]);
+
+const ENTERTAINMENT_PROVIDER_TYPES = new Set([
+  "amusement_center",
+  "amusement_park",
+  "bowling_alley",
+  "casino",
+  "movie_theater",
+  "performing_arts_theater",
+  "theater",
+  "tourist_attraction",
+]);
+
+const MUSEUM_PROVIDER_TYPES = new Set(["aquarium", "art_gallery", "museum", "zoo"]);
+const PARK_PROVIDER_TYPES = new Set(["beach", "campground", "national_park", "park", "rv_park"]);
+
+const SHOP_PROVIDER_TYPES = new Set([
+  "book_store",
+  "clothing_store",
+  "convenience_store",
+  "department_store",
+  "electronics_store",
+  "furniture_store",
+  "grocery_store",
+  "hardware_store",
+  "home_goods_store",
+  "jewelry_store",
+  "liquor_store",
+  "shopping_mall",
+  "store",
+]);
+
+const HEALTH_PROVIDER_TYPES = new Set(["dentist", "doctor", "hospital", "pharmacy", "spa", "veterinary_care"]);
+const TRANSIT_PROVIDER_TYPES = new Set(["airport", "bus_station", "light_rail_station", "subway_station", "train_station", "transit_station"]);
+const GAS_PROVIDER_TYPES = new Set(["electric_vehicle_charging_station", "gas_station"]);
+
+function prettifyProviderType(value: string): string {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
 function normalizePlaceCategories(
   name: string,
   legacyCategory: string | null,
@@ -5185,6 +5483,10 @@ function numberValue(value: unknown): number | null {
   }
 
   return null;
+}
+
+function isValidCoordinate(latitude: number, longitude: number): boolean {
+  return latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180;
 }
 
 function cleanString(value: unknown): string | null {

@@ -64,6 +64,10 @@ final class MockVibeService: VibeServicing {
         }
     }
 
+    func searchProviderPlaces(query: String, latitude: Double?, longitude: Double?, limit: Int) async throws -> [PlaceCandidate] {
+        []
+    }
+
     func fetchPlace(id: String, deviceIdHash: String?) async throws -> VibePlace {
         guard var place = places.first(where: { $0.id == id }) else {
             throw APIError.server("That spot is not in the mock map.")

@@ -13,7 +13,10 @@ struct VibeMapApp: App {
         _viewModel = StateObject(
             wrappedValue: VibeMapViewModel(
                 vibeService: vibeService,
-                searchService: MapKitPlaceSearchService(),
+                searchService: HybridPlaceSearchService(
+                    mapKitSearch: MapKitPlaceSearchService(),
+                    providerSearch: vibeService
+                ),
                 locationService: LocationService(),
                 identityService: DeviceIdentityService()
             )

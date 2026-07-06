@@ -8,6 +8,88 @@ protocol PlaceSearching {
     func pointOfInterestChoices(named title: String?, near coordinate: CLLocationCoordinate2D) async throws -> [PlaceCandidateMatch]
 }
 
+struct HybridPlaceSearchService: PlaceSearching {
+    private static let providerResultLimit = 8
+
+    let mapKitSearch: any PlaceSearching
+    let providerSearch: any ProviderPlaceSearching
+
+    func search(query: String, near coordinate: CLLocationCoordinate2D?) async throws -> [PlaceCandidate] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            return []
+        }
+
+        var mapKitError: Error?
+        let mapKitResults: [PlaceCandidate]
+        do {
+            mapKitResults = try await mapKitSearch.search(query: trimmedQuery, near: coordinate)
+        } catch {
+            mapKitError = error
+            mapKitResults = []
+        }
+
+        guard shouldIncludeProviderResults(for: trimmedQuery, mapKitResults: mapKitResults) else {
+            return mapKitResults
+        }
+
+        let providerResults = (try? await providerSearch.searchProviderPlaces(
+            query: trimmedQuery,
+            latitude: coordinate?.latitude,
+            longitude: coordinate?.longitude,
+            limit: Self.providerResultLimit
+        )) ?? []
+
+        let mergedResults = Array(
+            (mapKitResults + providerResults)
+                .sortedBySearchRelevance(query: trimmedQuery)
+                .uniquedByCandidateIdentity()
+                .prefix(10)
+        )
+
+        if mergedResults.isEmpty, let mapKitError {
+            throw mapKitError
+        }
+
+        return mergedResults
+    }
+
+    func pointOfInterestChoices(for selectedItem: MKMapItem) async throws -> [PlaceCandidateMatch] {
+        try await mapKitSearch.pointOfInterestChoices(for: selectedItem)
+    }
+
+    func pointOfInterestChoices(named title: String?, near coordinate: CLLocationCoordinate2D) async throws -> [PlaceCandidateMatch] {
+        try await mapKitSearch.pointOfInterestChoices(named: title, near: coordinate)
+    }
+
+    private func shouldIncludeProviderResults(for query: String, mapKitResults: [PlaceCandidate]) -> Bool {
+        if mapKitResults.count < 5 {
+            return true
+        }
+
+        let normalizedQuery = normalized(query)
+        let queryTokens = normalizedQuery.split(separator: " ").map(String.init)
+        guard !normalizedQuery.isEmpty, !queryTokens.isEmpty else {
+            return false
+        }
+
+        return !mapKitResults.prefix(3).contains { candidate in
+            let normalizedName = normalized(candidate.name)
+            return normalizedName == normalizedQuery ||
+                normalizedName.hasPrefix(normalizedQuery) ||
+                queryTokens.allSatisfy { normalizedName.contains($0) }
+        }
+    }
+
+    private func normalized(_ value: String) -> String {
+        value
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+}
+
 struct MapKitPlaceSearchService: PlaceSearching {
     private static let overlappingPOISearchRadiusMeters: CLLocationDistance = 24
     private static let overlappingPOIDistanceMeters: CLLocationDistance = 8
@@ -407,6 +489,12 @@ struct MapKitPlaceSearchService: PlaceSearching {
     }
 
     private func providerPlaceID(for item: MKMapItem) -> String {
+        if #available(iOS 18.0, *),
+           let identifier = item.identifier?.rawValue.trimmingCharacters(in: .whitespacesAndNewlines),
+           !identifier.isEmpty {
+            return identifier
+        }
+
         let coordinate = item.placemark.coordinate
         return [
             item.name ?? item.placemark.name ?? "place",
@@ -501,13 +589,22 @@ private extension Array where Element == PlaceCandidate {
     }
 
     private static func identityKey(for candidate: PlaceCandidate) -> String {
+        let normalizedName = normalized(candidate.name)
+        if !normalizedName.isEmpty {
+            return [
+                normalizedName,
+                String(format: "%.4f", candidate.latitude),
+                String(format: "%.4f", candidate.longitude)
+            ].joined(separator: "|")
+        }
+
         if let providerPlaceId = candidate.providerPlaceId?.trimmingCharacters(in: .whitespacesAndNewlines),
            !providerPlaceId.isEmpty {
             return "\(candidate.provider)|\(normalized(providerPlaceId))"
         }
 
         return [
-            normalized(candidate.name),
+            normalizedName,
             String(format: "%.4f", candidate.latitude),
             String(format: "%.4f", candidate.longitude)
         ].joined(separator: "|")

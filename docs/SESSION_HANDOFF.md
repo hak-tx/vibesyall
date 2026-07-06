@@ -109,11 +109,12 @@ The backend normalizes legacy labels to current tags. Do not lose old data when 
 - Production should fail cleanly if email cannot send; do not auto-confirm production accounts.
 - Cache/read optimization matters. Use caching and viewport/map-cell endpoints for map data, but do not serve stale write responses.
 - Do not put secrets in docs or committed files.
+- Explicit search can use optional Google Places fallback via `/places/provider-search`; keep Apple/MapKit primary in the app and store selected provider IDs under the internal canonical place id.
 - Private admin analytics are hosted at `https://vibesyall.com/admin` behind Cloudflare Access.
 - Cloudflare Zero Trust org: `vibesyall.cloudflareaccess.com`; Access app: `VIBES Y'ALL Admin Dashboard`; protected destinations: `vibesyall.com/admin` and `vibesyall.com/admin/*`.
 - Access policy is `Brian only`, allowing `brianhakel@gmail.com` and the Cloudflare account email `hakelbrian@gmail.com`.
 - Access login uses the `Email one-time code` identity provider, `auto_redirect_to_identity: true`, and `same_site_cookie_attribute: lax`; do not change SameSite back to `strict` because the Cloudflare Access callback can loop after email-code login on mobile browsers.
-- Worker secrets required for admin/analytics are `ANALYTICS_SECRET`, `CF_ACCESS_AUD`, and `CF_ACCESS_TEAM_DOMAIN`; do not print or commit their values.
+- Worker secrets required for admin/analytics are `ANALYTICS_SECRET`, `CF_ACCESS_AUD`, and `CF_ACCESS_TEAM_DOMAIN`; optional provider fallback search uses `GOOGLE_PLACES_API_KEY`; do not print or commit their values.
 - Analytics tables are `analytics_devices`, `analytics_device_days`, and `analytics_events`.
 - Admin-only device labels live in `admin_device_labels`; the dashboard defaults to excluding rows marked `excluded_from_core_metrics` so Brian/Rich seed activity can be filtered out before public launch.
 - Analytics is first-party and anonymous. It stores app opens, search result counts without raw search text, place selections, account-flow events, and server-side vibe submissions.

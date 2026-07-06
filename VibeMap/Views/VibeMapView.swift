@@ -947,10 +947,14 @@ private struct CurrentLocationButton: View {
 }
 
 #Preview {
+    let service = MockVibeService()
     VibeMapView(
         viewModel: VibeMapViewModel(
-            vibeService: MockVibeService(),
-            searchService: MapKitPlaceSearchService(),
+            vibeService: service,
+            searchService: HybridPlaceSearchService(
+                mapKitSearch: MapKitPlaceSearchService(),
+                providerSearch: service
+            ),
             locationService: LocationService(),
             identityService: DeviceIdentityService()
         )

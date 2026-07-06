@@ -33,6 +33,14 @@ final class ResilientVibeService: VibeServicing {
         }
     }
 
+    func searchProviderPlaces(query: String, latitude: Double?, longitude: Double?, limit: Int) async throws -> [PlaceCandidate] {
+        try await runWithConnectivityFallback {
+            try await primary.searchProviderPlaces(query: query, latitude: latitude, longitude: longitude, limit: limit)
+        } fallback: {
+            try await fallback.searchProviderPlaces(query: query, latitude: latitude, longitude: longitude, limit: limit)
+        }
+    }
+
     func fetchPlace(id: String, deviceIdHash: String?) async throws -> VibePlace {
         try await runWithConnectivityFallback {
             try await primary.fetchPlace(id: id, deviceIdHash: deviceIdHash)

@@ -1,6 +1,10 @@
 import Foundation
 
-protocol VibeServicing {
+protocol ProviderPlaceSearching {
+    func searchProviderPlaces(query: String, latitude: Double?, longitude: Double?, limit: Int) async throws -> [PlaceCandidate]
+}
+
+protocol VibeServicing: ProviderPlaceSearching {
     func fetchVibes() async throws -> [VibeTag]
     func fetchNearby(latitude: Double, longitude: Double, radius: Double, vibeFilter: VibeTag?, deviceIdHash: String?) async throws -> [VibePlace]
     func fetchMapCells(latitude: Double, longitude: Double, radius: Double, cellSize: Double, vibeFilter: VibeTag?) async throws -> [MapCellCluster]
@@ -86,6 +90,29 @@ struct VibeAPIClient: VibeServicing {
 
         let response: MapCellsResponse = try await get(url: url)
         return response.cells
+    }
+
+    func searchProviderPlaces(query: String, latitude: Double?, longitude: Double?, limit: Int) async throws -> [PlaceCandidate] {
+        var components = URLComponents(url: baseURL.appendingPathComponent("places/provider-search"), resolvingAgainstBaseURL: false)
+        var queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "provider", value: "google"),
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+
+        if let latitude, let longitude {
+            queryItems.append(URLQueryItem(name: "lat", value: String(format: "%.5f", latitude)))
+            queryItems.append(URLQueryItem(name: "lng", value: String(format: "%.5f", longitude)))
+        }
+
+        components?.queryItems = queryItems
+
+        guard let url = components?.url else {
+            throw APIError.invalidURL
+        }
+
+        let response: ProviderPlaceSearchResponse = try await get(url: url)
+        return response.candidates
     }
 
     func fetchPlace(id: String, deviceIdHash: String?) async throws -> VibePlace {
@@ -232,6 +259,10 @@ private struct NearbyPlacesResponse: Decodable {
 
 private struct MapCellsResponse: Decodable {
     var cells: [MapCellCluster]
+}
+
+private struct ProviderPlaceSearchResponse: Decodable {
+    var candidates: [PlaceCandidate]
 }
 
 private struct PlaceResponse: Decodable {

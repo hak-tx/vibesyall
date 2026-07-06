@@ -32,6 +32,8 @@ The core tables are:
 When a provider id is missing, the API falls back to a conservative nearby-name match before creating a new place id.
 Place categories keep two levels for future API/data licensing value: `primary_category` is the broad VIBES Y'ALL grouping used in the app UI, while `provider_category` stores the exact provider category when MapKit supplies one, such as `Cafe`, `Bakery`, `Winery`, or `Movie Theater`.
 The legacy `category` field remains a compatibility alias for the broad primary category.
+Search can optionally use Google Places Text Search as a fallback when MapKit returns weak results.
+Provider search candidates are read-only until a user selects/submits them; at that point the existing place upsert path attaches the provider id to the canonical internal place.
 
 ## Vibe Tags
 
@@ -128,6 +130,7 @@ The profile layer does not change `vibe_events`; one current vibe event per plac
 - `POST /places`: create or upsert a place.
 - `GET /places/:id`: read place details and aggregate stats.
 - `GET /places/nearby?lat=&lng=&radius=`: read nearby places with aggregate stats.
+- `GET /places/provider-search?q=&lat=&lng=`: optional Google Places fallback candidates for explicit search.
 - `POST /vibes`: submit or update one anonymous user's vibe for a place.
 - `GET /vibes/tags`: read active tags in sort order.
 - `POST /reports`: report wrong places, duplicates, spam, inappropriate data, or other issues.
@@ -205,9 +208,10 @@ Then configure these Worker values:
 - `CF_ACCESS_TEAM_DOMAIN`: the Cloudflare Access team domain, including `https://`, for example `https://your-team.cloudflareaccess.com`.
 - `CF_ACCESS_AUD`: the Access application Audience (AUD) tag from the admin Access app.
 - `ANALYTICS_SECRET`: Worker secret used to derive analytics-only device ids from the app's hashed device id.
+- `GOOGLE_PLACES_API_KEY`: optional Worker secret for Google Places Text Search fallback. If missing, `/places/provider-search` returns no candidates and the iOS app continues using MapKit-only search.
 
 The admin routes fail closed if the Access JWT configuration or allowed emails are missing.
-Do not put `ANALYTICS_SECRET` in this repo; set it as a Worker secret.
+Do not put `ANALYTICS_SECRET` or `GOOGLE_PLACES_API_KEY` in this repo; set them as Worker secrets.
 
 The dashboard currently tracks:
 
