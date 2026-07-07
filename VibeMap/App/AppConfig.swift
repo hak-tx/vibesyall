@@ -43,6 +43,7 @@ enum AppConfig {
     static let privacyPolicyURL = URL(string: "https://vibesyall.com/privacy")!
     static let termsURL = URL(string: "https://vibesyall.com/terms")!
     static let supportURL = URL(string: "https://vibesyall.com/support")!
+    static let appStoreURL = URL(string: "https://apps.apple.com/us/app/vibes-yall/id6783989332")!
     static let supportEmail = "vibesyall@gmail.com"
 
     static let forceMockBackend = false

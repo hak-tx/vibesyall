@@ -1,3 +1,5 @@
+import CoreImage
+import CoreImage.CIFilterBuiltins
 import MapKit
 import SwiftUI
 import UIKit
@@ -576,7 +578,7 @@ struct SharePlaceButton: View {
 
         let tags = effectiveSelectedTags
         let card = VibeShareCardView(place: place, selectedTags: tags)
-            .frame(width: 1080, height: 1350)
+            .frame(width: 1536, height: 1024)
             .environment(\.colorScheme, .light)
 
         let renderer = ImageRenderer(content: card)
@@ -588,7 +590,8 @@ struct SharePlaceButton: View {
 
         sharePayload = VibeSharePayload(
             image: image,
-            text: shareText(for: tags)
+            text: shareText(for: tags),
+            url: AppConfig.appStoreURL
         )
     }
 
@@ -611,9 +614,10 @@ private struct VibeSharePayload: Identifiable {
     let id = UUID()
     let image: UIImage
     let text: String
+    let url: URL
 
     var activityItems: [Any] {
-        [image, text]
+        [image, text, url]
     }
 }
 
@@ -631,156 +635,250 @@ private struct VibeShareCardView: View {
     let place: VibePlace
     let selectedTags: [VibeTag]
 
+    private let cardBackground = Color(red: 0.99, green: 0.965, blue: 0.925)
+    private let panelBackground = LinearGradient(
+        colors: [
+            VibeDesign.brandBlue,
+            Color(red: 0.02, green: 0.12, blue: 0.31)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.99, green: 0.96, blue: 0.88),
-                    Color(red: 0.98, green: 0.97, blue: 0.94)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            cardBackground
 
-            VStack(alignment: .leading, spacing: 44) {
-                header
+            RoundedRectangle(cornerRadius: 48, style: .continuous)
+                .fill(cardBackground)
+                .shadow(color: Color.black.opacity(0.18), radius: 30, y: 18)
+                .padding(44)
 
-                VStack(alignment: .leading, spacing: 20) {
-                    Text(place.name)
-                        .font(.system(size: 74, weight: .black))
-                        .foregroundStyle(VibeDesign.primaryText)
-                        .lineLimit(3)
-                        .minimumScaleFactor(0.72)
+            HStack(spacing: 46) {
+                leftColumn
+                    .frame(width: 875, alignment: .leading)
 
-                    if !place.locationLine.isEmpty {
-                        Text(place.locationLine)
-                            .font(.system(size: 32, weight: .semibold))
-                            .foregroundStyle(VibeDesign.linkText)
-                            .lineLimit(2)
-                    }
+                Rectangle()
+                    .fill(VibeDesign.brandBlue.opacity(0.15))
+                    .frame(width: 2)
+                    .padding(.vertical, 8)
 
-                    if let category = place.displayCategory {
-                        Label(category, systemImage: "tag.fill")
-                            .font(.system(size: 29, weight: .bold))
-                            .foregroundStyle(VibeDesign.secondaryText)
-                    }
-                }
-
-                selectedVibesSection
-
-                communitySection
-
-                Spacer(minLength: 0)
-
-                Text("Real places. Real vibes.")
-                    .font(.system(size: 28, weight: .black))
-                    .foregroundStyle(VibeDesign.primary.opacity(0.78))
-                    .frame(maxWidth: .infinity, alignment: .center)
+                rightColumn
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(76)
+            .padding(.horizontal, 78)
+            .padding(.vertical, 76)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 62, style: .continuous))
+    }
+
+    private var leftColumn: some View {
+        VStack(alignment: .leading, spacing: 30) {
+            header
+
+            vibePanel
+        }
+        .frame(maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var header: some View {
-        HStack(alignment: .center) {
-            Image("BrandLogo")
-                .resizable()
-                .scaledToFill()
-                .frame(width: 178, height: 178)
-                .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 36, style: .continuous)
-                        .stroke(Color.white.opacity(0.60), lineWidth: 2)
+        VStack(alignment: .leading, spacing: 24) {
+            HStack(alignment: .center, spacing: 28) {
+                ZStack {
+                    Circle()
+                        .fill(VibeDesign.brandBlue)
+                        .frame(width: 98, height: 98)
+
+                    Image(systemName: categorySymbolName)
+                        .font(.system(size: 48, weight: .black))
+                        .foregroundStyle(VibeDesign.brandYellow)
                 }
 
-            Spacer()
-
-            if let topVibe = place.stats?.visibleTopVibes.first {
-                ShareMetricPill(
-                    title: "Top vibe",
-                    value: "\(topVibe.vibeTag.rawValue) \(topVibe.percentage)%",
-                    vibe: topVibe.vibeTag
-                )
-            } else {
-                ShareMetricPill(title: "Vibe count", value: "Be first", vibe: nil)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var selectedVibesSection: some View {
-        if selectedTags.isEmpty {
-            ShareSection(title: "Check this place out") {
-                Text("Send it to someone who needs a good spot.")
-                    .font(.system(size: 36, weight: .bold))
-                    .foregroundStyle(VibeDesign.primaryText)
+                Text(place.name.uppercased())
+                    .font(.system(size: 62, weight: .black))
+                    .foregroundStyle(VibeDesign.brandBlue)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.58)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 30)
-                    .padding(.vertical, 28)
-                    .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
             }
-        } else {
-            ShareSection(title: "My vibe") {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
-                    ForEach(selectedTags) { tag in
-                        ShareVibePill(tag: tag)
-                    }
-                }
-            }
-        }
-    }
 
-    @ViewBuilder
-    private var communitySection: some View {
-        ShareSection(title: "Community") {
-            if let stats = place.stats, stats.ratingCount > 0 {
-                VStack(spacing: 14) {
-                    HStack {
-                        Label(vibeCountText(stats.ratingCount), systemImage: "person.2.fill")
-                            .font(.system(size: 28, weight: .black))
-                            .foregroundStyle(VibeDesign.primary)
+            HStack(spacing: 18) {
+                Image(systemName: "mappin.circle.fill")
+                    .font(.system(size: 44, weight: .black))
+                    .foregroundStyle(VibeDesign.brandBlue)
 
-                        Spacer()
-                    }
-
-                    ForEach(stats.visibleTopVibes.prefix(3)) { breakdown in
-                        HStack(spacing: 18) {
-                            Image(systemName: breakdown.vibeTag.visualStyle.symbolName)
-                                .font(.system(size: 30, weight: .black))
-                                .foregroundStyle(breakdown.vibeTag.visualStyle.color)
-                                .frame(width: 42)
-
-                            Text(breakdown.vibeTag.rawValue)
-                                .font(.system(size: 34, weight: .black))
-                                .foregroundStyle(VibeDesign.primaryText)
-
-                            Spacer()
-
-                            Text("\(breakdown.percentage)%")
-                                .font(.system(size: 36, weight: .black))
-                                .foregroundStyle(breakdown.vibeTag.visualStyle.color)
-                        }
-                        .padding(.horizontal, 26)
-                        .padding(.vertical, 20)
-                        .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-                    }
-                }
-            } else {
-                Text("No community votes yet.")
-                    .font(.system(size: 34, weight: .bold))
-                    .foregroundStyle(VibeDesign.primaryText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 30)
-                    .padding(.vertical, 28)
-                    .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                Text(locationText)
+                    .font(.system(size: 34, weight: .black))
+                    .foregroundStyle(VibeDesign.brandBlue)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
             }
         }
     }
 
-    private func vibeCountText(_ count: Int) -> String {
-        let countText = Self.countFormatter.string(from: NSNumber(value: count)) ?? "\(count)"
-        return "\(countText) \(count == 1 ? "vibe" : "vibes") submitted"
+    private var vibePanel: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(communityRows.enumerated()), id: \.offset) { index, row in
+                ShareCardVibeRow(model: row)
+
+                if index < communityRows.count - 1 {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.28))
+                        .frame(height: 2)
+                        .padding(.leading, 4)
+                }
+            }
+
+            Rectangle()
+                .fill(Color.white.opacity(0.28))
+                .frame(height: 2)
+                .padding(.leading, 4)
+
+            HStack(spacing: 24) {
+                Image(systemName: "person.3.fill")
+                    .font(.system(size: 54, weight: .black))
+                    .foregroundStyle(VibeDesign.brandYellow)
+                    .frame(width: 92)
+
+                Text(vibeCountHeadline)
+                    .font(.system(size: 70, weight: .black))
+                    .foregroundStyle(VibeDesign.brandYellow)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+
+                Text("VIBES SUBMITTED")
+                    .font(.system(size: 30, weight: .black))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 32)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 6)
+        }
+        .padding(.horizontal, 30)
+        .padding(.vertical, 30)
+        .frame(maxWidth: .infinity, minHeight: 612, alignment: .top)
+        .background(panelBackground, in: RoundedRectangle(cornerRadius: 34, style: .continuous))
+    }
+
+    private var rightColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("SEE IT.\nVIBE IT.\nSHARE IT.")
+                .font(.system(size: 68, weight: .black))
+                .foregroundStyle(VibeDesign.brandBlue)
+                .lineSpacing(16)
+                .lineLimit(3)
+                .minimumScaleFactor(0.72)
+
+            Rectangle()
+                .fill(VibeDesign.brandYellow)
+                .frame(height: 7)
+                .padding(.top, 30)
+                .padding(.trailing, 32)
+
+            Spacer(minLength: 40)
+
+            HStack(alignment: .center, spacing: 26) {
+                VStack(alignment: .leading, spacing: 26) {
+                    Text("GET THE APP!")
+                        .font(.system(size: 26, weight: .black))
+                        .foregroundStyle(VibeDesign.brandBlue)
+                        .lineLimit(1)
+
+                    ShareAppStoreBadge()
+
+                    Text("Scan or tap the link to open VIBES Y'ALL.")
+                        .font(.system(size: 21, weight: .bold))
+                        .foregroundStyle(VibeDesign.brandBlue.opacity(0.72))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                ShareQRCodeView(url: AppConfig.appStoreURL)
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var communityRows: [ShareCardVibeRowModel] {
+        if let stats = place.stats, stats.ratingCount > 0 {
+            return stats.visibleTopVibes.prefix(3).map {
+                ShareCardVibeRowModel(tag: $0.vibeTag, title: $0.vibeTag.rawValue, percentageText: "\($0.percentage)%")
+            }
+        }
+
+        let tags = VibeTag.normalizedSelection(selectedTags)
+        if !tags.isEmpty {
+            return tags.prefix(3).map {
+                ShareCardVibeRowModel(tag: $0, title: $0.rawValue, percentageText: "MY PICK")
+            }
+        }
+
+        return [
+            ShareCardVibeRowModel(tag: .iconic, title: "Be first", percentageText: "VIBE IT")
+        ]
+    }
+
+    private var vibeCountHeadline: String {
+        let count = max(place.stats?.ratingCount ?? 0, selectedTags.isEmpty ? 0 : 1)
+        return Self.countFormatter.string(from: NSNumber(value: count)) ?? "\(count)"
+    }
+
+    private var locationText: String {
+        if !place.localityLine.isEmpty {
+            return place.localityLine.uppercased()
+        }
+
+        if let country = place.country, !country.isEmpty {
+            return country.uppercased()
+        }
+
+        return String(format: "%.3f, %.3f", place.latitude, place.longitude)
+    }
+
+    private var categorySymbolName: String {
+        let category = place.displayCategory?.lowercased() ?? ""
+        let name = place.name.lowercased()
+        let searchable = "\(category) \(name)"
+
+        if searchable.contains("restaurant") ||
+            searchable.contains("bar") ||
+            searchable.contains("cafe") ||
+            searchable.contains("coffee") ||
+            searchable.contains("bbq") ||
+            searchable.contains("grill") ||
+            searchable.contains("kitchen") ||
+            searchable.contains("pizza") {
+            return "fork.knife"
+        }
+
+        if searchable.contains("park") || searchable.contains("trail") || searchable.contains("garden") {
+            return "leaf.fill"
+        }
+
+        if searchable.contains("museum") || searchable.contains("gallery") {
+            return "building.columns.fill"
+        }
+
+        if searchable.contains("hotel") || searchable.contains("inn") {
+            return "bed.double.fill"
+        }
+
+        if searchable.contains("gas") || searchable.contains("station") {
+            return "fuelpump.fill"
+        }
+
+        if searchable.contains("movie") || searchable.contains("cinema") || searchable.contains("theater") {
+            return "film.fill"
+        }
+
+        if searchable.contains("shop") || searchable.contains("store") || searchable.contains("market") {
+            return "bag.fill"
+        }
+
+        return "mappin.and.ellipse"
     }
 
     private static let countFormatter: NumberFormatter = {
@@ -790,85 +888,115 @@ private struct VibeShareCardView: View {
     }()
 }
 
-private struct ShareSection<Content: View>: View {
-    let title: String
-    let content: Content
-
-    init(title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text(title.uppercased())
-                .font(.system(size: 24, weight: .black))
-                .foregroundStyle(VibeDesign.secondaryText)
-
-            content
-        }
-    }
-}
-
-private struct ShareMetricPill: View {
-    let title: String
-    let value: String
-    let vibe: VibeTag?
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 8) {
-            Text(title.uppercased())
-                .font(.system(size: 20, weight: .black))
-                .foregroundStyle(VibeDesign.secondaryText)
-
-            HStack(spacing: 12) {
-                if let vibe {
-                    Image(systemName: vibe.visualStyle.symbolName)
-                        .font(.system(size: 26, weight: .black))
-                        .foregroundStyle(vibe.visualStyle.color)
-                }
-
-                Text(value)
-                    .font(.system(size: 28, weight: .black))
-                    .foregroundStyle(VibeDesign.primaryText)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.trailing)
-            }
-        }
-        .padding(.horizontal, 26)
-        .padding(.vertical, 20)
-        .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-    }
-}
-
-private struct ShareVibePill: View {
+private struct ShareCardVibeRowModel {
     let tag: VibeTag
+    let title: String
+    let percentageText: String
+}
+
+private struct ShareCardVibeRow: View {
+    let model: ShareCardVibeRowModel
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 28) {
             ZStack {
                 Circle()
-                    .fill(tag.visualStyle.color.opacity(0.16))
-                    .frame(width: 54, height: 54)
+                    .stroke(VibeDesign.brandYellow, lineWidth: 2)
+                    .frame(width: 112, height: 112)
 
-                Image(systemName: tag.visualStyle.symbolName)
-                    .font(.system(size: 25, weight: .black))
-                    .foregroundStyle(tag.visualStyle.color)
+                Image(systemName: model.tag.visualStyle.symbolName)
+                    .font(.system(size: 55, weight: .black))
+                    .foregroundStyle(VibeDesign.brandYellow)
             }
 
-            Text(tag.rawValue)
-                .font(.system(size: 32, weight: .black))
-                .foregroundStyle(VibeDesign.primaryText)
+            Text(model.title.uppercased())
+                .font(.system(size: 43, weight: .black))
+                .foregroundStyle(.white)
                 .lineLimit(2)
-                .minimumScaleFactor(0.76)
+                .minimumScaleFactor(0.62)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(model.percentageText)
+                .font(.system(size: model.percentageText.contains("%") ? 66 : 36, weight: .black))
+                .foregroundStyle(VibeDesign.brandYellow)
+                .lineLimit(1)
+                .minimumScaleFactor(0.58)
+                .frame(width: 190, alignment: .trailing)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 22)
-        .background(Color.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .frame(minHeight: 154)
+        .padding(.horizontal, 4)
+    }
+}
+
+private struct ShareAppStoreBadge: View {
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: "apple.logo")
+                .font(.system(size: 42, weight: .medium))
+                .foregroundStyle(.white)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Download on the")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.white)
+
+                Text("App Store")
+                    .font(.system(size: 31, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 20)
+        .frame(width: 260, height: 86, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [VibeDesign.brandBlue, Color(red: 0.02, green: 0.09, blue: 0.24)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
+    }
+}
+
+private struct ShareQRCodeView: View {
+    let url: URL
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.white)
+                .frame(width: 220, height: 220)
+
+            if let image = Self.qrImage(for: url) {
+                Image(uiImage: image)
+                    .interpolation(.none)
+                    .resizable()
+                    .frame(width: 174, height: 174)
+            } else {
+                Image(systemName: "qrcode")
+                    .font(.system(size: 140, weight: .regular))
+                    .foregroundStyle(VibeDesign.brandBlue)
+            }
+        }
         .overlay {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .stroke(tag.visualStyle.color.opacity(0.20), lineWidth: 2)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(VibeDesign.brandYellow, lineWidth: 6)
         }
+    }
+
+    private static let context = CIContext()
+
+    private static func qrImage(for url: URL) -> UIImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(url.absoluteString.utf8)
+        filter.correctionLevel = "M"
+
+        guard let outputImage = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 12, y: 12)),
+              let cgImage = context.createCGImage(outputImage, from: outputImage.extent) else {
+            return nil
+        }
+
+        return UIImage(cgImage: cgImage)
     }
 }
