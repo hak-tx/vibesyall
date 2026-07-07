@@ -682,35 +682,38 @@ private struct VibeShareCardView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 24) {
-            HStack(alignment: .center, spacing: 28) {
-                ZStack {
-                    Circle()
-                        .fill(VibeDesign.brandBlue)
-                        .frame(width: 98, height: 98)
+            HStack(alignment: .top, spacing: 28) {
+                Image("BrandLogo")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 98, height: 98)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(Color.white.opacity(0.72), lineWidth: 2)
+                    }
 
-                    Image(systemName: categorySymbolName)
-                        .font(.system(size: 48, weight: .black))
-                        .foregroundStyle(VibeDesign.brandYellow)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(place.name.uppercased())
+                        .font(.system(size: 62, weight: .black))
+                        .foregroundStyle(VibeDesign.brandBlue)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.58)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    HStack(alignment: .top, spacing: 14) {
+                        Image(systemName: "map.fill")
+                            .font(.system(size: 30, weight: .black))
+                            .foregroundStyle(VibeDesign.brandBlue)
+                            .frame(width: 36, height: 36)
+
+                        Text(addressText)
+                            .font(.system(size: 30, weight: .bold))
+                            .foregroundStyle(VibeDesign.brandBlue)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.62)
+                    }
                 }
-
-                Text(place.name.uppercased())
-                    .font(.system(size: 62, weight: .black))
-                    .foregroundStyle(VibeDesign.brandBlue)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.58)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            HStack(spacing: 18) {
-                Image(systemName: "mappin.circle.fill")
-                    .font(.system(size: 44, weight: .black))
-                    .foregroundStyle(VibeDesign.brandBlue)
-
-                Text(locationText)
-                    .font(.system(size: 34, weight: .black))
-                    .foregroundStyle(VibeDesign.brandBlue)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.65)
             }
         }
     }
@@ -734,7 +737,7 @@ private struct VibeShareCardView: View {
                 .padding(.leading, 4)
 
             HStack(spacing: 24) {
-                Image(systemName: "person.3.fill")
+                Image(systemName: "person.2.fill")
                     .font(.system(size: 54, weight: .black))
                     .foregroundStyle(VibeDesign.brandYellow)
                     .frame(width: 92)
@@ -838,47 +841,12 @@ private struct VibeShareCardView: View {
         return String(format: "%.3f, %.3f", place.latitude, place.longitude)
     }
 
-    private var categorySymbolName: String {
-        let category = place.displayCategory?.lowercased() ?? ""
-        let name = place.name.lowercased()
-        let searchable = "\(category) \(name)"
-
-        if searchable.contains("restaurant") ||
-            searchable.contains("bar") ||
-            searchable.contains("cafe") ||
-            searchable.contains("coffee") ||
-            searchable.contains("bbq") ||
-            searchable.contains("grill") ||
-            searchable.contains("kitchen") ||
-            searchable.contains("pizza") {
-            return "fork.knife"
+    private var addressText: String {
+        if !place.locationLine.isEmpty {
+            return place.locationLine
         }
 
-        if searchable.contains("park") || searchable.contains("trail") || searchable.contains("garden") {
-            return "leaf.fill"
-        }
-
-        if searchable.contains("museum") || searchable.contains("gallery") {
-            return "building.columns.fill"
-        }
-
-        if searchable.contains("hotel") || searchable.contains("inn") {
-            return "bed.double.fill"
-        }
-
-        if searchable.contains("gas") || searchable.contains("station") {
-            return "fuelpump.fill"
-        }
-
-        if searchable.contains("movie") || searchable.contains("cinema") || searchable.contains("theater") {
-            return "film.fill"
-        }
-
-        if searchable.contains("shop") || searchable.contains("store") || searchable.contains("market") {
-            return "bag.fill"
-        }
-
-        return "mappin.and.ellipse"
+        return locationText
     }
 
     private static let countFormatter: NumberFormatter = {
@@ -901,12 +869,17 @@ private struct ShareCardVibeRow: View {
         HStack(spacing: 28) {
             ZStack {
                 Circle()
-                    .stroke(VibeDesign.brandYellow, lineWidth: 2)
+                    .fill(model.tag.visualStyle.color.opacity(0.22))
+                    .frame(width: 112, height: 112)
+
+                Circle()
+                    .stroke(model.tag.visualStyle.color, lineWidth: 3)
                     .frame(width: 112, height: 112)
 
                 Image(systemName: model.tag.visualStyle.symbolName)
                     .font(.system(size: 55, weight: .black))
-                    .foregroundStyle(VibeDesign.brandYellow)
+                    .foregroundStyle(model.tag.visualStyle.color)
+                    .symbolRenderingMode(.hierarchical)
             }
 
             Text(model.title.uppercased())
@@ -918,7 +891,7 @@ private struct ShareCardVibeRow: View {
 
             Text(model.percentageText)
                 .font(.system(size: model.percentageText.contains("%") ? 66 : 36, weight: .black))
-                .foregroundStyle(VibeDesign.brandYellow)
+                .foregroundStyle(model.tag.visualStyle.color)
                 .lineLimit(1)
                 .minimumScaleFactor(0.58)
                 .frame(width: 190, alignment: .trailing)
@@ -930,32 +903,10 @@ private struct ShareCardVibeRow: View {
 
 private struct ShareAppStoreBadge: View {
     var body: some View {
-        HStack(spacing: 16) {
-            Image(systemName: "apple.logo")
-                .font(.system(size: 42, weight: .medium))
-                .foregroundStyle(.white)
-
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Download on the")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(.white)
-
-                Text("App Store")
-                    .font(.system(size: 31, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-            }
-        }
-        .padding(.horizontal, 20)
-        .frame(width: 260, height: 86, alignment: .leading)
-        .background(
-            LinearGradient(
-                colors: [VibeDesign.brandBlue, Color(red: 0.02, green: 0.09, blue: 0.24)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-        )
+        Image("DownloadOnAppStore")
+            .resizable()
+            .scaledToFit()
+            .frame(width: 260, height: 86, alignment: .leading)
     }
 }
 
