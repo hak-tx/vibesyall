@@ -75,8 +75,10 @@ class VibeMapViewModel(
     val state: StateFlow<VibeMapUiState> = mutableState.asStateFlow()
 
     private var viewportJob: Job? = null
+    private var clusterFocusJob: Job? = null
     private var searchJob: Job? = null
     private var lastViewportKey: String? = null
+    private var pendingClusterFocus: Pair<LatLng, Float>? = null
 
     init {
         viewModelScope.launch {
@@ -112,8 +114,54 @@ class VibeMapViewModel(
     }
 
     fun onCameraIdle(center: LatLng, zoom: Float) {
+        val completedClusterFocus = pendingClusterFocus?.let { (target, targetZoom) ->
+            kotlin.math.abs(center.latitude - target.latitude) < 0.02 &&
+                kotlin.math.abs(center.longitude - target.longitude) < 0.02 &&
+                zoom >= targetZoom - 0.35f
+        } == true
+        if (completedClusterFocus) pendingClusterFocus = null
         mutableState.update { it.copy(cameraCenter = center, cameraZoom = zoom) }
-        loadViewport(center, zoom)
+        loadViewport(center, zoom, immediate = completedClusterFocus)
+    }
+
+    fun focusMapCell(cell: MapCellCluster) {
+        val center = LatLng(cell.latitude, cell.longitude)
+        val zoom = maxOf(mutableState.value.cameraZoom + 2.5f, 11f).coerceAtMost(14f)
+        pendingClusterFocus = center to zoom
+        mutableState.update {
+            it.copy(
+                cameraCenter = center,
+                cameraZoom = zoom,
+                mapCells = emptyList(),
+                panelExpanded = false,
+                selectedPlace = null,
+            )
+        }
+        lastViewportKey = null
+        clusterFocusJob?.cancel()
+        clusterFocusJob = viewModelScope.launch {
+            delay(700)
+            val radius = radiusForZoom(zoom)
+            val filter = selectedFilter()
+            runCatching { api.fetchNearby(center.latitude, center.longitude, radius, filter, includeDevice = false) }
+                .onSuccess { places ->
+                    mutableState.update {
+                        it.copy(
+                            nearbyPlaces = places,
+                            mapCells = emptyList(),
+                            isLoadingMap = false,
+                            errorMessage = null,
+                        )
+                    }
+                    lastViewportKey = "%.3f|%.3f|%.0f|%s".format(
+                        center.latitude,
+                        center.longitude,
+                        radius,
+                        filter?.id.orEmpty(),
+                    )
+                }
+                .onFailure(::showError)
+        }
     }
 
     private fun loadViewport(center: LatLng, zoom: Float, immediate: Boolean = false) {
@@ -138,7 +186,7 @@ class VibeMapViewModel(
                     val cells = api.fetchMapCells(center.latitude, center.longitude, radius, cellSize, filter, mutableState.value.tags)
                     mutableState.update { it.copy(mapCells = cells.take(56), nearbyPlaces = emptyList(), isLoadingMap = false) }
                 } else {
-                    val places = api.fetchNearby(center.latitude, center.longitude, radius, filter)
+                    val places = api.fetchNearby(center.latitude, center.longitude, radius, filter, includeDevice = false)
                     mutableState.update { it.copy(nearbyPlaces = places, mapCells = emptyList(), isLoadingMap = false) }
                 }
             }.onFailure(::showError)

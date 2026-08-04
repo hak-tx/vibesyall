@@ -36,6 +36,7 @@ class VibesApi(private val identityStore: SecureIdentityStore) {
         longitude: Double,
         radius: Double,
         vibeFilter: VibeTag?,
+        includeDevice: Boolean = true,
     ): List<VibePlace> {
         val query = mutableMapOf(
             "lat" to "%.5f".format(latitude),
@@ -43,7 +44,7 @@ class VibesApi(private val identityStore: SecureIdentityStore) {
             "radius" to "%.0f".format(radius.coerceIn(5_000.0, 2_500_000.0)),
         )
         vibeFilter?.let { query["vibe_tag"] = it.id }
-        return request("GET", "/places/nearby", query = query, includeDevice = true)
+        return request("GET", "/places/nearby", query = query, includeDevice = includeDevice)
             .optJSONArray("places")
             .orEmptyObjects()
             .map(::parsePlace)

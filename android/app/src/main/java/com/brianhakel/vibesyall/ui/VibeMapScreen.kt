@@ -65,7 +65,6 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ThumbDown
 import androidx.compose.material.icons.filled.TrendingUp
-import androidx.compose.material.icons.filled.VolunteerActivism
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Eco
@@ -331,6 +330,10 @@ private fun VibesGoogleMap(state: VibeMapUiState, viewModel: VibeMapViewModel) {
                 state = MarkerState(LatLng(cell.latitude, cell.longitude)),
                 title = "${cell.count} vibed places",
                 snippet = cell.topVibe?.let { "${it.emoji} ${it.displayName} · ${cell.totalVibes} vibes" },
+                onClick = {
+                    viewModel.focusMapCell(cell)
+                    true
+                },
             ) {
                 VibeMapMarker(tag = cell.topVibe, count = cell.count, regional = true)
             }
@@ -395,6 +398,15 @@ private fun VibeMapMarker(
 
 @Composable
 private fun VibeSymbol(tag: VibeTag?, tint: Color, modifier: Modifier = Modifier) {
+    if (tag?.id == "needs_prayer") {
+        Icon(
+            painter = painterResource(R.drawable.ic_needs_prayer),
+            contentDescription = null,
+            tint = tint,
+            modifier = modifier,
+        )
+        return
+    }
     val icon: ImageVector = when (tag?.id) {
         "changed_my_life" -> Icons.Default.Star
         "fire" -> Icons.Default.LocalFireDepartment
@@ -408,7 +420,6 @@ private fun VibeSymbol(tag: VibeTag?, tint: Color, modifier: Modifier = Modifier
         "chaos" -> Icons.Default.Cyclone
         "overrated" -> Icons.Default.ThumbDown
         "tourist_trap" -> Icons.Default.PhotoCamera
-        "needs_prayer" -> Icons.Default.VolunteerActivism
         "emotionally_damaging" -> Icons.Default.Cancel
         else -> Icons.Default.LocationOn
     }
@@ -484,16 +495,16 @@ private fun VibeFilters(tags: List<VibeTag>, selectedIds: Set<String>, onSelect:
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         item {
-            FilterPill("All", "✦", selectedIds.isEmpty()) { onSelect(null) }
+            FilterPill("All", null, selectedIds.isEmpty()) { onSelect(null) }
         }
         items(tags, key = VibeTag::id) { tag ->
-            FilterPill(tag.displayName, tag.emoji, tag.id in selectedIds) { onSelect(tag) }
+            FilterPill(tag.displayName, tag, tag.id in selectedIds) { onSelect(tag) }
         }
     }
 }
 
 @Composable
-private fun FilterPill(label: String, emoji: String, selected: Boolean, onClick: () -> Unit) {
+private fun FilterPill(label: String, tag: VibeTag?, selected: Boolean, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.clickable(onClick = onClick),
         color = if (selected) BrandNavy else Color.White.copy(alpha = 0.84f),
@@ -503,7 +514,11 @@ private fun FilterPill(label: String, emoji: String, selected: Boolean, onClick:
         shadowElevation = 2.dp,
     ) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(emoji, fontSize = 14.sp)
+            if (tag == null) {
+                Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp))
+            } else {
+                VibeSymbol(tag, if (selected) Color.White else tag.color, Modifier.size(16.dp))
+            }
             Spacer(Modifier.width(5.dp))
             Text(label, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
         }
@@ -557,18 +572,21 @@ private fun SearchResultRow(result: SearchResultItem, onClick: () -> Unit) {
     val subtitle: String
     val distance: String?
     val vibe: String?
+    val vibeTag: VibeTag?
     when (result) {
         is SearchResultItem.CommunityPlace -> {
             title = result.place.name
             subtitle = result.place.locationLine.ifBlank { result.place.category.orEmpty() }
             distance = formatDistance(result.place.distanceMeters)
-            vibe = result.place.topVibe?.let { "${it.tag.emoji} ${it.tag.displayName} ${it.percentage}%" }
+            vibeTag = result.place.topVibe?.tag
+            vibe = result.place.topVibe?.let { "${it.tag.displayName} ${it.percentage}%" }
         }
         is SearchResultItem.GooglePlace -> {
             title = result.prediction.title
             subtitle = result.prediction.subtitle
             distance = formatDistance(result.prediction.distanceMeters?.toDouble())
             vibe = null
+            vibeTag = null
         }
     }
     Row(
@@ -580,7 +598,15 @@ private fun SearchResultRow(result: SearchResultItem, onClick: () -> Unit) {
         Column(Modifier.weight(1f)) {
             Text(title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (subtitle.isNotBlank()) Text(subtitle, color = MutedInk, fontSize = 13.sp, maxLines = 2)
-            vibe?.let { Text(it, color = BrandNavy, fontWeight = FontWeight.SemiBold, fontSize = 12.sp) }
+            vibe?.let {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    vibeTag?.let { tag ->
+                        VibeSymbol(tag, tag.color, Modifier.size(13.dp))
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(it, color = BrandNavy, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                }
+            }
         }
         distance?.let { Text(it, color = MutedInk, fontSize = 12.sp) }
     }
@@ -686,7 +712,11 @@ private fun NearbyPlaceRow(place: VibePlace, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Surface(color = place.topVibe?.tag?.color?.copy(alpha = 0.15f) ?: BrandNavy.copy(alpha = 0.08f), shape = CircleShape) {
-            Text(place.topVibe?.tag?.emoji ?: "✦", modifier = Modifier.padding(10.dp), fontSize = 20.sp)
+            Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
+                val tag = place.topVibe?.tag
+                if (tag == null) Icon(Icons.Default.AutoAwesome, null, tint = BrandNavy, modifier = Modifier.size(20.dp))
+                else VibeSymbol(tag, tag.color, Modifier.size(20.dp))
+            }
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
@@ -754,7 +784,9 @@ private fun CommunityVibes(place: VibePlace) {
             Text("Everyone else", fontWeight = FontWeight.Black, color = BrandNavy)
             place.stats?.topVibes?.take(3)?.forEach { breakdown ->
                 Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("${breakdown.tag.emoji} ${breakdown.tag.displayName}", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                    VibeSymbol(breakdown.tag, breakdown.tag.color, Modifier.size(17.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Text(breakdown.tag.displayName, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                     Text("${breakdown.percentage}%", color = breakdown.tag.color, fontWeight = FontWeight.Black)
                 }
             }
