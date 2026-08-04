@@ -1,6 +1,7 @@
 @file:OptIn(
     androidx.compose.material3.ExperimentalMaterial3Api::class,
     androidx.compose.foundation.layout.ExperimentalLayoutApi::class,
+    com.google.maps.android.compose.MapsComposeExperimentalApi::class,
 )
 
 package com.brianhakel.vibesyall.ui
@@ -106,6 +107,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -136,17 +138,42 @@ import com.brianhakel.vibesyall.ui.theme.Sheet
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.gms.maps.model.MapStyleOptions
+import com.google.maps.android.clustering.ClusterItem
+import com.google.maps.android.compose.clustering.Clustering
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapType
 import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.MarkerComposable
-import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val PanelShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+
+private sealed class VibeClusterItem : ClusterItem {
+    abstract val tag: VibeTag?
+    abstract val representedPlaces: Int
+
+    data class Place(val place: VibePlace) : VibeClusterItem() {
+        override val tag: VibeTag? = place.topVibe?.tag
+        override val representedPlaces: Int = 1
+        override fun getPosition(): LatLng = LatLng(place.latitude, place.longitude)
+        override fun getTitle(): String = place.name
+        override fun getSnippet(): String? = place.topVibe?.let { "${it.tag.emoji} ${it.tag.displayName} · ${place.vibeCount} vibes" }
+        override fun getZIndex(): Float = 0f
+    }
+
+    data class Cell(val cell: MapCellCluster) : VibeClusterItem() {
+        override val tag: VibeTag? = cell.topVibe
+        override val representedPlaces: Int = cell.count
+        override fun getPosition(): LatLng = LatLng(cell.latitude, cell.longitude)
+        override fun getTitle(): String = "${cell.count} vibed places"
+        override fun getSnippet(): String? = cell.topVibe?.let { "${it.emoji} ${it.displayName} · ${cell.totalVibes} vibes" }
+        override fun getZIndex(): Float = 0f
+    }
+}
 
 @Composable
 fun VibeMapScreen(
@@ -298,6 +325,7 @@ fun VibeMapScreen(
 @Composable
 private fun VibesGoogleMap(state: VibeMapUiState, viewModel: VibeMapViewModel) {
     var mapLoaded by remember { mutableStateOf(false) }
+    val mapScope = rememberCoroutineScope()
     val cameraState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(state.cameraCenter, state.cameraZoom)
     }
@@ -314,6 +342,12 @@ private fun VibesGoogleMap(state: VibeMapUiState, viewModel: VibeMapViewModel) {
         zoomControlsEnabled = false,
         mapToolbarEnabled = false,
     )
+    val clusterItems = remember(state.nearbyPlaces, state.mapCells) {
+        buildList<VibeClusterItem> {
+            addAll(state.nearbyPlaces.map(VibeClusterItem::Place))
+            addAll(state.mapCells.map(VibeClusterItem::Cell))
+        }
+    }
 
     LaunchedEffect(mapLoaded, state.cameraCenter, state.cameraZoom) {
         if (!mapLoaded) return@LaunchedEffect
@@ -342,39 +376,46 @@ private fun VibesGoogleMap(state: VibeMapUiState, viewModel: VibeMapViewModel) {
         onPOIClick = viewModel::selectMapPoint,
         onMapLoaded = { mapLoaded = true },
     ) {
-        if (!cameraState.isMoving) {
-            state.nearbyPlaces.forEach { place ->
-                MarkerComposable(
-                    keys = arrayOf<Any>(place.id, place.topVibe?.tag?.id.orEmpty(), state.selectedPlace?.id == place.id),
-                    state = MarkerState(LatLng(place.latitude, place.longitude)),
-                    title = place.name,
-                    snippet = place.topVibe?.let { "${it.tag.emoji} ${it.tag.displayName} · ${place.vibeCount} vibes" },
-                    onClick = {
-                        viewModel.selectNearbyPlace(place)
-                        true
-                    },
-                ) {
-                    VibeMapMarker(
-                        tag = place.topVibe?.tag,
-                        selected = state.selectedPlace?.id == place.id,
+        Clustering(
+            items = clusterItems,
+            onClusterClick = { cluster ->
+                val bounds = LatLngBounds.builder().apply {
+                    cluster.items.forEach { include(it.position) }
+                }.build()
+                mapScope.launch {
+                    cameraState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 140), 420)
+                }
+                true
+            },
+            onClusterItemClick = { item ->
+                when (item) {
+                    is VibeClusterItem.Place -> viewModel.selectNearbyPlace(item.place)
+                    is VibeClusterItem.Cell -> viewModel.focusMapCell(item.cell)
+                }
+                true
+            },
+            clusterContent = { cluster ->
+                val representative = cluster.items.maxByOrNull(VibeClusterItem::representedPlaces)
+                VibeMapMarker(
+                    tag = representative?.tag,
+                    count = cluster.items.sumOf(VibeClusterItem::representedPlaces),
+                    regional = true,
+                )
+            },
+            clusterItemContent = { item ->
+                when (item) {
+                    is VibeClusterItem.Place -> VibeMapMarker(
+                        tag = item.tag,
+                        selected = state.selectedPlace?.id == item.place.id,
+                    )
+                    is VibeClusterItem.Cell -> VibeMapMarker(
+                        tag = item.tag,
+                        count = item.representedPlaces,
+                        regional = true,
                     )
                 }
-            }
-            state.mapCells.forEach { cell ->
-                MarkerComposable(
-                    keys = arrayOf<Any>(cell.id, cell.topVibe?.id.orEmpty(), cell.count),
-                    state = MarkerState(LatLng(cell.latitude, cell.longitude)),
-                    title = "${cell.count} vibed places",
-                    snippet = cell.topVibe?.let { "${it.emoji} ${it.displayName} · ${cell.totalVibes} vibes" },
-                    onClick = {
-                        viewModel.focusMapCell(cell)
-                        true
-                    },
-                ) {
-                    VibeMapMarker(tag = cell.topVibe, count = cell.count, regional = true)
-                }
-            }
-        }
+            },
+        )
     }
 }
 

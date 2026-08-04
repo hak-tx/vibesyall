@@ -82,6 +82,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
 
     implementation("com.google.maps.android:maps-compose:6.12.0")
+    implementation("com.google.maps.android:maps-compose-utils:6.12.0")
     implementation("com.google.android.libraries.places:places:5.1.1")
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
