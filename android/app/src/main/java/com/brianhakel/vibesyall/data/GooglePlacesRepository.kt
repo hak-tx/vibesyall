@@ -1,6 +1,7 @@
 package com.brianhakel.vibesyall.data
 
 import android.content.Context
+import android.util.Log
 import com.brianhakel.vibesyall.BuildConfig
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.libraries.places.api.Places
@@ -35,13 +36,18 @@ class GooglePlacesRepository(context: Context) {
             .setOrigin(origin)
             .setSessionToken(token)
             .build()
-        return placesClient.findAutocompletePredictions(request).await().autocompletePredictions.map { prediction ->
-            PlacePrediction(
-                placeId = prediction.placeId,
-                title = prediction.getPrimaryText(null).toString(),
-                subtitle = prediction.getSecondaryText(null).toString(),
-                distanceMeters = prediction.distanceMeters,
-            )
+        return try {
+            placesClient.findAutocompletePredictions(request).await().autocompletePredictions.map { prediction ->
+                PlacePrediction(
+                    placeId = prediction.placeId,
+                    title = prediction.getPrimaryText(null).toString(),
+                    subtitle = prediction.getSecondaryText(null).toString(),
+                    distanceMeters = prediction.distanceMeters,
+                )
+            }
+        } catch (error: Exception) {
+            Log.w("VibesPlaces", "Google Places autocomplete failed: ${error.message}", error)
+            throw error
         }
     }
 

@@ -10,6 +10,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,7 +18,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -43,6 +43,10 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.Cyclone
+import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -50,11 +54,21 @@ import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.RemoveCircle
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.ThumbDown
+import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.VolunteerActivism
+import androidx.compose.material.icons.filled.WorkspacePremium
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Eco
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -76,6 +90,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -87,8 +102,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
@@ -111,7 +125,6 @@ import com.brianhakel.vibesyall.ui.theme.Ink
 import com.brianhakel.vibesyall.ui.theme.MutedInk
 import com.brianhakel.vibesyall.ui.theme.Sheet
 import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MapStyleOptions
@@ -120,6 +133,7 @@ import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapType
 import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerComposable
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import kotlinx.coroutines.delay
@@ -249,6 +263,7 @@ fun VibeMapScreen(
 
 @Composable
 private fun VibesGoogleMap(state: VibeMapUiState, viewModel: VibeMapViewModel) {
+    var mapLoaded by remember { mutableStateOf(false) }
     val cameraState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(state.cameraCenter, state.cameraZoom)
     }
@@ -266,7 +281,8 @@ private fun VibesGoogleMap(state: VibeMapUiState, viewModel: VibeMapViewModel) {
         mapToolbarEnabled = false,
     )
 
-    LaunchedEffect(state.cameraCenter, state.cameraZoom) {
+    LaunchedEffect(mapLoaded, state.cameraCenter, state.cameraZoom) {
+        if (!mapLoaded) return@LaunchedEffect
         val current = cameraState.position
         val target = state.cameraCenter
         if (kotlin.math.abs(current.target.latitude - target.latitude) > 0.0001 ||
@@ -290,36 +306,113 @@ private fun VibesGoogleMap(state: VibeMapUiState, viewModel: VibeMapViewModel) {
         uiSettings = uiSettings,
         onMapClick = { viewModel.setPanelExpanded(false) },
         onPOIClick = viewModel::selectMapPoint,
+        onMapLoaded = { mapLoaded = true },
     ) {
         state.nearbyPlaces.forEach { place ->
-            Marker(
+            MarkerComposable(
+                keys = arrayOf<Any>(place.id, place.topVibe?.tag?.id.orEmpty(), state.selectedPlace?.id == place.id),
                 state = MarkerState(LatLng(place.latitude, place.longitude)),
                 title = place.name,
                 snippet = place.topVibe?.let { "${it.tag.emoji} ${it.tag.displayName} · ${place.vibeCount} vibes" },
-                icon = BitmapDescriptorFactory.defaultMarker(
-                    place.topVibe?.tag?.color?.let(::colorToMarkerHue) ?: BitmapDescriptorFactory.HUE_AZURE,
-                ),
                 onClick = {
                     viewModel.selectNearbyPlace(place)
                     true
                 },
-            )
+            ) {
+                VibeMapMarker(
+                    tag = place.topVibe?.tag,
+                    selected = state.selectedPlace?.id == place.id,
+                )
+            }
         }
         state.mapCells.forEach { cell ->
-            Marker(
+            MarkerComposable(
+                keys = arrayOf<Any>(cell.id, cell.topVibe?.id.orEmpty(), cell.count),
                 state = MarkerState(LatLng(cell.latitude, cell.longitude)),
                 title = "${cell.count} vibed places",
                 snippet = cell.topVibe?.let { "${it.emoji} ${it.displayName} · ${cell.totalVibes} vibes" },
-                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE),
-            )
+            ) {
+                VibeMapMarker(tag = cell.topVibe, count = cell.count, regional = true)
+            }
         }
     }
 }
 
-private fun colorToMarkerHue(color: Color): Float {
-    val hsv = FloatArray(3)
-    android.graphics.Color.colorToHSV(color.toArgb(), hsv)
-    return hsv[0]
+@Composable
+private fun VibeMapMarker(
+    tag: VibeTag?,
+    count: Int? = null,
+    selected: Boolean = false,
+    regional: Boolean = false,
+) {
+    val accent = tag?.color ?: BrandNavy
+    val markerSize = if (regional) 38.dp else if (selected) 36.dp else 30.dp
+    Box(
+        modifier = Modifier.size(markerSize + if (count != null) 14.dp else 0.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (regional) {
+            Box(
+                Modifier
+                    .size(markerSize + 8.dp)
+                    .background(accent.copy(alpha = 0.18f), CircleShape),
+            )
+        }
+        Surface(
+            modifier = Modifier.size(markerSize),
+            shape = CircleShape,
+            color = if (selected) accent else Color.White.copy(alpha = 0.96f),
+            border = BorderStroke(if (selected) 3.dp else 2.dp, if (selected) Color.White else Color.White.copy(alpha = 0.9f)),
+            shadowElevation = 5.dp,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                VibeSymbol(
+                    tag = tag,
+                    tint = if (selected) Color.White else accent,
+                    modifier = Modifier.size(if (regional) 19.dp else if (selected) 18.dp else 15.dp),
+                )
+            }
+        }
+        if (count != null && count > 1) {
+            Surface(
+                modifier = Modifier.align(Alignment.BottomEnd),
+                shape = CircleShape,
+                color = BrandNavy,
+                border = BorderStroke(1.5.dp, Color.White),
+                shadowElevation = 3.dp,
+            ) {
+                Text(
+                    text = if (count > 99) "99+" else count.toString(),
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 10.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VibeSymbol(tag: VibeTag?, tint: Color, modifier: Modifier = Modifier) {
+    val icon: ImageVector = when (tag?.id) {
+        "changed_my_life" -> Icons.Default.Star
+        "fire" -> Icons.Default.LocalFireDepartment
+        "worth_the_drive" -> Icons.Default.DirectionsCar
+        "iconic" -> Icons.Default.AutoAwesome
+        "hidden_gem" -> Icons.Default.Diamond
+        "underrated" -> Icons.Default.TrendingUp
+        "bougie" -> Icons.Default.WorkspacePremium
+        "low_key" -> Icons.Default.Eco
+        "mid" -> Icons.Default.RemoveCircle
+        "chaos" -> Icons.Default.Cyclone
+        "overrated" -> Icons.Default.ThumbDown
+        "tourist_trap" -> Icons.Default.PhotoCamera
+        "needs_prayer" -> Icons.Default.VolunteerActivism
+        "emotionally_damaging" -> Icons.Default.Cancel
+        else -> Icons.Default.LocationOn
+    }
+    Icon(icon, contentDescription = null, tint = tint, modifier = modifier)
 }
 
 @Composable
@@ -683,83 +776,97 @@ private fun RatingSheet(
     onShare: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Sheet, dragHandle = null) {
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth().imePadding(),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Sheet,
+        dragHandle = null,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .imePadding()
+                .padding(horizontal = 18.dp)
+                .padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 8.dp),
         ) {
-            item {
-                Row(verticalAlignment = Alignment.Top) {
-                    Column(Modifier.weight(1f)) {
-                        Text(place.name, fontWeight = FontWeight.Black, fontSize = 27.sp, lineHeight = 30.sp)
-                        Text(place.locationLine, color = MutedInk, fontSize = 13.sp, maxLines = 2)
+            Box(Modifier.fillMaxWidth().height(48.dp)) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 7.dp)
+                        .size(width = 42.dp, height = 5.dp)
+                        .background(Color.Black.copy(alpha = 0.18f), RoundedCornerShape(50)),
+                )
+                Button(
+                    onClick = {
+                        if (submitted) onDismiss()
+                        else if (selectedIds.isEmpty()) onDismiss()
+                        else onSubmit()
+                    },
+                    enabled = !loading,
+                    modifier = Modifier.align(Alignment.CenterEnd).height(38.dp),
+                    shape = RoundedCornerShape(50),
+                    contentPadding = PaddingValues(horizontal = 18.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandNavy),
+                ) {
+                    if (loading) {
+                        CircularProgressIndicator(Modifier.size(17.dp), color = Color.White, strokeWidth = 2.dp)
+                    } else {
+                        Text("Done", fontWeight = FontWeight.Black, fontSize = 15.sp)
                     }
-                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Close") }
                 }
             }
+
+            CurrentPlaceSummary(place = place, onShare = onShare)
+
             if (submitted) {
-                item {
-                    Spacer(Modifier.height(12.dp))
-                    Surface(color = BrandNavy, shape = RoundedCornerShape(20.dp)) {
-                        Column(Modifier.fillMaxWidth().padding(18.dp)) {
-                            Text("Your vibe is on the map", color = BrandYellow, fontWeight = FontWeight.Black, fontSize = 20.sp)
-                            Text(
-                                "You picked: ${tags.filter { it.id in selectedIds }.joinToString(" + ") { "${it.emoji} ${it.displayName}" }}",
-                                color = Color.White,
-                                modifier = Modifier.padding(top = 8.dp),
+                Spacer(Modifier.height(12.dp))
+                Surface(color = BrandNavy, shape = RoundedCornerShape(18.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        Text("Your vibe is on the map", color = BrandYellow, fontWeight = FontWeight.Black, fontSize = 19.sp)
+                        Text(
+                            "You picked: ${tags.filter { it.id in selectedIds }.joinToString(" + ") { "${it.emoji} ${it.displayName}" }}",
+                            color = Color.White,
+                            modifier = Modifier.padding(top = 7.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                CommunityVibes(place)
+            } else {
+                Spacer(Modifier.height(11.dp))
+                Text("Pick one to three vibes", fontWeight = FontWeight.Black, fontSize = 22.sp, color = Ink)
+                Spacer(Modifier.height(8.dp))
+
+                tags.sortedBy(VibeTag::sortOrder).chunked(2).forEach { rowTags ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        rowTags.forEach { tag ->
+                            VibeChoice(
+                                tag = tag,
+                                selected = tag.id in selectedIds,
+                                enabled = tag.id in selectedIds || selectedIds.size < 3,
+                                onClick = { onToggle(tag) },
+                                modifier = Modifier.weight(1f),
                             )
                         }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    CommunityVibes(place)
-                    Spacer(Modifier.height(14.dp))
-                    Button(onClick = onShare, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Default.Share, null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Share this place")
-                    }
-                    TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Done") }
-                }
-            } else {
-                item {
-                    Spacer(Modifier.height(8.dp))
-                    Text("What’s the vibe?", fontWeight = FontWeight.Black, fontSize = 22.sp)
-                    Text("Pick one to three. Your whole button is tappable.", color = MutedInk, fontSize = 13.sp)
-                }
-                val groups = listOf(
-                    "Love it" to tags.filter { it.sentimentGroup == "positive" },
-                    "It’s…" to tags.filter { it.sentimentGroup in setOf("identity", "neutral") },
-                    "Skip it" to tags.filter { it.sentimentGroup == "negative" },
-                )
-                groups.forEach { (label, groupTags) ->
-                    item {
-                        Text(label, modifier = Modifier.padding(top = 17.dp, bottom = 8.dp), fontWeight = FontWeight.Black, color = BrandNavy)
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            groupTags.forEach { tag ->
-                                VibeChoice(tag, tag.id in selectedIds, enabled = tag.id in selectedIds || selectedIds.size < 3) { onToggle(tag) }
-                            }
-                        }
+                        if (rowTags.size == 1) Spacer(Modifier.weight(1f))
                     }
                 }
-                item {
-                    Spacer(Modifier.height(18.dp))
-                    Button(
-                        onClick = onSubmit,
-                        enabled = selectedIds.isNotEmpty() && !loading,
-                        modifier = Modifier.fillMaxWidth().height(54.dp),
-                        shape = RoundedCornerShape(15.dp),
+
+                if (place.myRating != null) {
+                    TextButton(
+                        onClick = onDelete,
+                        modifier = Modifier.align(Alignment.CenterHorizontally).height(36.dp),
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
                     ) {
-                        if (loading) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
-                        else Text(if (place.myRating == null) "Put my vibes on the map" else "Update my vibes", fontWeight = FontWeight.Black)
+                        Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("Delete my vibes", fontSize = 12.sp)
                     }
-                    if (place.myRating != null) {
-                        TextButton(onClick = onDelete, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
-                            Icon(Icons.Default.Delete, null)
-                            Spacer(Modifier.width(5.dp))
-                            Text("Delete my vibes")
-                        }
-                    }
-                    Spacer(Modifier.height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()))
                 }
             }
         }
@@ -767,22 +874,138 @@ private fun RatingSheet(
 }
 
 @Composable
-private fun VibeChoice(tag: VibeTag, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun CurrentPlaceSummary(place: VibePlace, onShare: () -> Unit) {
     Surface(
-        modifier = Modifier.clickable(enabled = enabled, onClick = onClick),
-        color = if (selected) tag.color else Color.White,
-        contentColor = if (selected) Color.White else Ink,
-        border = androidx.compose.foundation.BorderStroke(1.5.dp, if (selected) tag.color else tag.color.copy(alpha = if (enabled) 0.55f else 0.18f)),
-        shape = RoundedCornerShape(13.dp),
-        shadowElevation = if (selected) 4.dp else 0.dp,
+        modifier = Modifier.fillMaxWidth(),
+        color = Color(0xFFF9F9F4),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.5.dp, BrandNavy.copy(alpha = 0.75f)),
+        shadowElevation = 5.dp,
     ) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(tag.emoji)
-            Spacer(Modifier.width(6.dp))
-            Text(tag.displayName, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = if (enabled || selected) Color.Unspecified else MutedInk.copy(alpha = 0.4f))
+        Column(Modifier.padding(13.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Surface(modifier = Modifier.size(34.dp), shape = CircleShape, color = BrandNavy) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.LocationOn, null, tint = BrandYellow, modifier = Modifier.size(20.dp))
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        place.name.uppercase(),
+                        color = BrandNavy,
+                        fontWeight = FontWeight.Black,
+                        fontSize = if (place.name.length > 28) 18.sp else 22.sp,
+                        lineHeight = 23.sp,
+                        maxLines = 2,
+                    )
+                    if (place.locationLine.isNotBlank()) {
+                        Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Directions, null, tint = BrandNavy, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text(place.locationLine, color = BrandNavy, fontWeight = FontWeight.Bold, fontSize = 12.sp, lineHeight = 15.sp, maxLines = 2)
+                        }
+                    }
+                    place.primaryCategory?.let {
+                        Text(it, color = MutedInk, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+                    }
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("SHARE IT.", color = BrandNavy, fontWeight = FontWeight.Black, fontSize = 11.sp)
+                    Button(
+                        onClick = onShare,
+                        modifier = Modifier.padding(top = 3.dp).height(38.dp),
+                        shape = RoundedCornerShape(50),
+                        contentPadding = PaddingValues(horizontal = 13.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = BrandNavy),
+                    ) {
+                        Icon(Icons.Default.Share, null, tint = BrandYellow, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("Share", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            if (place.vibeCount > 0) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                    color = BrandNavy.copy(alpha = 0.055f),
+                    shape = RoundedCornerShape(15.dp),
+                    border = BorderStroke(1.dp, BrandNavy.copy(alpha = 0.24f)),
+                ) {
+                    Column(Modifier.padding(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("TOP VIBES HERE", color = BrandNavy, fontWeight = FontWeight.Black, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                            Text("${place.vibeCount} ${if (place.vibeCount == 1) "vibe" else "vibes"}", color = MutedInk, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                        }
+                        Row(Modifier.padding(top = 7.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            place.stats?.topVibes?.take(2)?.forEach { breakdown ->
+                                Surface(
+                                    modifier = Modifier.weight(1f),
+                                    color = Color.White.copy(alpha = 0.78f),
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, breakdown.tag.color.copy(alpha = 0.22f)),
+                                ) {
+                                    Row(Modifier.padding(horizontal = 7.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(modifier = Modifier.size(24.dp), shape = CircleShape, color = breakdown.tag.color.copy(alpha = 0.14f)) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                VibeSymbol(breakdown.tag, breakdown.tag.color, Modifier.size(13.dp))
+                                            }
+                                        }
+                                        Spacer(Modifier.width(5.dp))
+                                        Text(breakdown.tag.displayName, Modifier.weight(1f), fontWeight = FontWeight.Black, fontSize = 10.sp, maxLines = 2)
+                                        Text("${breakdown.percentage}%", color = breakdown.tag.color, fontWeight = FontWeight.Black, fontSize = 10.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VibeChoice(
+    tag: VibeTag,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.heightIn(min = 48.dp),
+        color = if (selected) tag.color.copy(alpha = 0.11f) else Color(0xFFFDFDF9),
+        contentColor = Ink,
+        border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) tag.color.copy(alpha = 0.78f) else Color.Black.copy(alpha = 0.10f)),
+        shape = RoundedCornerShape(13.dp),
+        shadowElevation = 0.dp,
+    ) {
+        Row(Modifier.padding(horizontal = 9.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(modifier = Modifier.size(27.dp), shape = CircleShape, color = tag.color.copy(alpha = if (selected) 0.92f else 0.14f)) {
+                Box(contentAlignment = Alignment.Center) {
+                    VibeSymbol(tag, if (selected) Color.White else tag.color, Modifier.size(15.dp))
+                }
+            }
+            Spacer(Modifier.width(7.dp))
+            Text(
+                tag.displayName,
+                modifier = Modifier.weight(1f),
+                fontWeight = FontWeight.Black,
+                fontSize = 12.5.sp,
+                lineHeight = 14.sp,
+                maxLines = 2,
+                color = if (enabled || selected) Ink else MutedInk.copy(alpha = 0.4f),
+            )
             if (selected) {
-                Spacer(Modifier.width(5.dp))
-                Icon(Icons.Default.Check, null, modifier = Modifier.size(15.dp))
+                Surface(modifier = Modifier.size(20.dp), shape = CircleShape, color = tag.color) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                    }
+                }
             }
         }
     }
