@@ -9,6 +9,19 @@ data class VibeTag(
     val sentimentGroup: String,
     val sortOrder: Int,
 ) {
+    val mapLabel: String
+        get() = when (id) {
+            "changed_my_life" -> "Life"
+            "worth_the_drive" -> "Drive"
+            "emotionally_damaging" -> "Damaging"
+            "hidden_gem" -> "Gem"
+            "underrated" -> "Under"
+            "tourist_trap" -> "Trap"
+            "needs_prayer" -> "Prayer"
+            "overrated" -> "Over"
+            else -> displayName
+        }
+
     val color: Color
         get() = when (id) {
             "changed_my_life" -> Color(0xFFEB8F1F)

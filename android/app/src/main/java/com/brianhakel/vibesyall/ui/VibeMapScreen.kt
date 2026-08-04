@@ -16,6 +16,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
@@ -34,6 +35,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -41,6 +43,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -58,6 +63,11 @@ import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Help
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.RemoveCircle
 import androidx.compose.material.icons.filled.Search
@@ -147,6 +157,7 @@ fun VibeMapScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+    var showAppMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         if (!state.locationPermissionGranted) requestLocationPermission()
@@ -162,7 +173,12 @@ fun VibeMapScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = Sheet,
     ) { scaffoldPadding ->
-        Box(Modifier.fillMaxSize().padding(bottom = scaffoldPadding.calculateBottomPadding())) {
+        BoxWithConstraints(Modifier.fillMaxSize().padding(bottom = scaffoldPadding.calculateBottomPadding())) {
+            val compactWidth = maxWidth < 380.dp
+            val compactHeight = maxHeight < 700.dp
+            val edgePadding = if (compactWidth) 10.dp else 16.dp
+            val panelWidth = if (maxWidth >= 700.dp) (maxWidth * 0.48f).coerceIn(460.dp, 580.dp) else maxWidth
+            val nearbyHeight = (maxHeight * 0.38f).coerceIn(250.dp, 370.dp)
             VibesGoogleMap(state = state, viewModel = viewModel)
 
             Column(
@@ -174,12 +190,14 @@ fun VibeMapScreen(
                     query = state.searchQuery,
                     onQueryChange = viewModel::updateSearchQuery,
                     onClear = viewModel::clearSearch,
-                    onAccount = viewModel::openAccount,
+                    onMenu = { showAppMenu = true },
+                    horizontalPadding = edgePadding,
                 )
                 VibeFilters(
                     tags = state.tags,
                     selectedIds = state.selectedFilterIds,
                     onSelect = viewModel::toggleFilter,
+                    horizontalPadding = edgePadding,
                 )
                 SearchResults(
                     query = state.searchQuery,
@@ -187,6 +205,8 @@ fun VibeMapScreen(
                     isSearching = state.isSearching,
                     mapsKeyMissing = state.mapsKeyMissing,
                     onSelect = viewModel::selectSearchResult,
+                    horizontalPadding = edgePadding,
+                    maxHeight = if (compactHeight) 280.dp else 390.dp,
                 )
             }
 
@@ -216,7 +236,8 @@ fun VibeMapScreen(
                     onRate = { viewModel.openRating() },
                     onDirections = { openDirections(context, state.selectedPlace!!) },
                     onShare = { sharePlace(context, state.selectedPlace!!) },
-                    modifier = Modifier.align(Alignment.BottomCenter),
+                    compact = compactHeight || compactWidth,
+                    modifier = Modifier.align(if (maxWidth >= 700.dp) Alignment.BottomStart else Alignment.BottomCenter).width(panelWidth),
                 )
             } else {
                 NearbyPanel(
@@ -226,7 +247,8 @@ fun VibeMapScreen(
                     loading = state.isLoadingMap,
                     onExpandChange = viewModel::setPanelExpanded,
                     onSelect = viewModel::selectNearbyPlace,
-                    modifier = Modifier.align(Alignment.BottomCenter),
+                    expandedHeight = nearbyHeight,
+                    modifier = Modifier.align(if (maxWidth >= 700.dp) Alignment.BottomStart else Alignment.BottomCenter).width(panelWidth),
                 )
             }
         }
@@ -256,6 +278,20 @@ fun VibeMapScreen(
             onLogout = viewModel::logout,
             onDelete = viewModel::deleteAccount,
             onDismiss = viewModel::closeAccount,
+        )
+    }
+
+    if (showAppMenu) {
+        AppMenuSheet(
+            onAccount = {
+                showAppMenu = false
+                viewModel.openAccount()
+            },
+            onDeleteAccount = {
+                showAppMenu = false
+                viewModel.openAccount()
+            },
+            onDismiss = { showAppMenu = false },
         )
     }
 }
@@ -431,74 +467,99 @@ private fun SearchBar(
     query: String,
     onQueryChange: (String) -> Unit,
     onClear: () -> Unit,
-    onAccount: () -> Unit,
+    onMenu: () -> Unit,
+    horizontalPadding: androidx.compose.ui.unit.Dp,
 ) {
     val focus = LocalFocusManager.current
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = horizontalPadding),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Surface(
-            modifier = Modifier.weight(1f),
-            color = BrandNavy.copy(alpha = 0.94f),
-            shape = RoundedCornerShape(18.dp),
+            modifier = Modifier.weight(1f).height(48.dp),
+            color = BrandNavy.copy(alpha = 0.82f),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, BrandYellow.copy(alpha = 0.18f)),
             shadowElevation = 8.dp,
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier.fillMaxSize(),
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color.White, fontSize = 17.sp),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(BrandYellow),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() }),
+                decorationBox = { field ->
+                    Row(
+                        Modifier.fillMaxSize().padding(start = 14.dp, end = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.Search, null, tint = BrandYellow, modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Box(Modifier.weight(1f)) {
+                            if (query.isEmpty()) Text("Search a place...", color = BrandYellow.copy(alpha = 0.8f), fontSize = 17.sp)
+                            field()
+                        }
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = onClear, modifier = Modifier.size(38.dp)) {
+                                Icon(Icons.Default.Clear, "Clear", tint = Color.White)
+                            }
+                        }
+                    }
+                },
+            )
+        }
+        Box(
+            modifier = Modifier.size(54.dp).clickable(onClick = onMenu),
+            contentAlignment = Alignment.TopStart,
+        ) {
+            Surface(
+                modifier = Modifier.size(50.dp),
+                shape = RoundedCornerShape(15.dp),
+                color = Color.White,
+                border = BorderStroke(2.5.dp, Color.White),
+                shadowElevation = 8.dp,
             ) {
                 Image(
                     painter = painterResource(R.drawable.brand_logo),
-                    contentDescription = "VIBES Y'ALL",
-                    modifier = Modifier.size(38.dp).clip(CircleShape),
-                )
-                Spacer(Modifier.width(5.dp))
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    placeholder = { Text("Search places", color = BrandYellow.copy(alpha = 0.88f)) },
-                    leadingIcon = { Icon(Icons.Default.Search, null, tint = BrandYellow) },
-                    trailingIcon = if (query.isNotEmpty()) {
-                        { IconButton(onClick = onClear) { Icon(Icons.Default.Clear, "Clear", tint = Color.White) } }
-                    } else null,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() }),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color.Transparent,
-                        unfocusedBorderColor = Color.Transparent,
-                        cursorColor = BrandYellow,
-                    ),
+                    contentDescription = "Open VIBES Y'ALL menu",
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(13.dp)),
                 )
             }
-        }
-        FilledIconButton(
-            onClick = onAccount,
-            modifier = Modifier.size(48.dp),
-            colors = IconButtonDefaults.filledIconButtonColors(containerColor = BrandNavy),
-        ) {
-            Icon(Icons.Default.Person, "Account", tint = BrandYellow)
+            Surface(
+                modifier = Modifier.align(Alignment.BottomEnd).size(19.dp),
+                shape = CircleShape,
+                color = BrandNavy,
+                border = BorderStroke(1.5.dp, BrandYellow),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Menu, null, tint = BrandYellow, modifier = Modifier.size(12.dp))
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun VibeFilters(tags: List<VibeTag>, selectedIds: Set<String>, onSelect: (VibeTag?) -> Unit) {
+private fun VibeFilters(
+    tags: List<VibeTag>,
+    selectedIds: Set<String>,
+    onSelect: (VibeTag?) -> Unit,
+    horizontalPadding: androidx.compose.ui.unit.Dp,
+) {
     LazyRow(
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        contentPadding = PaddingValues(horizontal = 14.dp),
+        contentPadding = PaddingValues(horizontal = horizontalPadding),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         item {
             FilterPill("All", null, selectedIds.isEmpty()) { onSelect(null) }
         }
         items(tags, key = VibeTag::id) { tag ->
-            FilterPill(tag.displayName, tag, tag.id in selectedIds) { onSelect(tag) }
+            FilterPill(tag.mapLabel, tag, tag.id in selectedIds) { onSelect(tag) }
         }
     }
 }
@@ -513,14 +574,14 @@ private fun FilterPill(label: String, tag: VibeTag?, selected: Boolean, onClick:
         shape = RoundedCornerShape(50),
         shadowElevation = 2.dp,
     ) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.height(30.dp).padding(horizontal = 9.dp), verticalAlignment = Alignment.CenterVertically) {
             if (tag == null) {
-                Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(12.dp))
             } else {
-                VibeSymbol(tag, if (selected) Color.White else tag.color, Modifier.size(16.dp))
+                VibeSymbol(tag, if (selected) Color.White else tag.color, Modifier.size(12.dp))
             }
-            Spacer(Modifier.width(5.dp))
-            Text(label, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Spacer(Modifier.width(4.dp))
+            Text(label, fontWeight = FontWeight.Bold, fontSize = 12.sp)
         }
     }
 }
@@ -532,10 +593,12 @@ private fun SearchResults(
     isSearching: Boolean,
     mapsKeyMissing: Boolean,
     onSelect: (SearchResultItem) -> Unit,
+    horizontalPadding: androidx.compose.ui.unit.Dp,
+    maxHeight: androidx.compose.ui.unit.Dp,
 ) {
     AnimatedVisibility(visible = query.length >= 2) {
         Card(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp).heightIn(max = 390.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = horizontalPadding, vertical = 8.dp).heightIn(max = maxHeight),
             colors = CardDefaults.cardColors(containerColor = Sheet.copy(alpha = 0.98f)),
             shape = RoundedCornerShape(20.dp),
             elevation = CardDefaults.cardElevation(10.dp),
@@ -658,23 +721,24 @@ private fun NearbyPanel(
     loading: Boolean,
     onExpandChange: (Boolean) -> Unit,
     onSelect: (VibePlace) -> Unit,
+    expandedHeight: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
 ) {
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .height(if (expanded) 330.dp else 76.dp),
+            .height(if (expanded) expandedHeight else 70.dp),
         shape = PanelShape,
         colors = CardDefaults.cardColors(containerColor = Sheet.copy(alpha = 0.98f)),
         elevation = CardDefaults.cardElevation(14.dp),
     ) {
         Column(Modifier.fillMaxSize().padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())) {
             Row(
-                modifier = Modifier.fillMaxWidth().clickable { onExpandChange(!expanded) }.padding(horizontal = 20.dp, vertical = 13.dp),
+                modifier = Modifier.fillMaxWidth().clickable { onExpandChange(!expanded) }.padding(horizontal = 16.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("What's Nearby", fontWeight = FontWeight.Black, fontSize = 21.sp, color = Ink)
+                    Text("What's Nearby", fontWeight = FontWeight.Black, fontSize = 20.sp, color = Ink)
                     val summary = when {
                         cells.isNotEmpty() -> "${cells.sumOf(MapCellCluster::count)} vibed places across this map"
                         places.isNotEmpty() -> "${places.size} places with community vibes"
@@ -708,14 +772,14 @@ private fun NearbyPanel(
 @Composable
 private fun NearbyPlaceRow(place: VibePlace, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Surface(color = place.topVibe?.tag?.color?.copy(alpha = 0.15f) ?: BrandNavy.copy(alpha = 0.08f), shape = CircleShape) {
-            Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
                 val tag = place.topVibe?.tag
-                if (tag == null) Icon(Icons.Default.AutoAwesome, null, tint = BrandNavy, modifier = Modifier.size(20.dp))
-                else VibeSymbol(tag, tag.color, Modifier.size(20.dp))
+                if (tag == null) Icon(Icons.Default.AutoAwesome, null, tint = BrandNavy, modifier = Modifier.size(18.dp))
+                else VibeSymbol(tag, tag.color, Modifier.size(18.dp))
             }
         }
         Spacer(Modifier.width(12.dp))
@@ -738,6 +802,7 @@ private fun SelectedPlacePanel(
     onRate: () -> Unit,
     onDirections: () -> Unit,
     onShare: () -> Unit,
+    compact: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -747,12 +812,12 @@ private fun SelectedPlacePanel(
         elevation = CardDefaults.cardElevation(16.dp),
     ) {
         Column(
-            Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
+            Modifier.padding(horizontal = 16.dp, vertical = if (compact) 10.dp else 13.dp)
                 .padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
         ) {
             Row(verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
-                    Text(place.name, fontWeight = FontWeight.Black, fontSize = 27.sp, lineHeight = 30.sp)
+                    Text(place.name, fontWeight = FontWeight.Black, fontSize = if (compact) 23.sp else 25.sp, lineHeight = if (compact) 26.sp else 28.sp)
                     if (place.locationLine.isNotBlank()) {
                         Row(Modifier.clickable(onClick = onDirections).padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Directions, null, tint = BrandNavy, modifier = Modifier.size(17.dp))
@@ -766,11 +831,11 @@ private fun SelectedPlacePanel(
                 IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close") }
             }
             if (place.vibeCount > 0) {
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(if (compact) 8.dp else 10.dp))
                 CommunityVibes(place)
             }
-            Spacer(Modifier.height(14.dp))
-            Button(onClick = onRate, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(15.dp)) {
+            Spacer(Modifier.height(if (compact) 9.dp else 12.dp))
+            Button(onClick = onRate, modifier = Modifier.fillMaxWidth().height(if (compact) 46.dp else 50.dp), shape = RoundedCornerShape(15.dp)) {
                 Text(if (place.myRating == null) "Vibe this place" else "Update my vibes", fontWeight = FontWeight.Black)
             }
         }
@@ -1044,6 +1109,86 @@ private fun VibeChoice(
 }
 
 @Composable
+private fun AppMenuSheet(
+    onAccount: () -> Unit,
+    onDeleteAccount: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Sheet,
+        dragHandle = null,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().widthIn(max = 560.dp).verticalScroll(rememberScrollState())
+                .padding(horizontal = 22.dp, vertical = 18.dp)
+                .padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("VIBES Y'ALL", Modifier.weight(1f), fontWeight = FontWeight.Black, fontSize = 30.sp, color = Ink)
+                Surface(shape = CircleShape, color = BrandNavy.copy(alpha = 0.06f)) {
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(38.dp)) {
+                        Icon(Icons.Default.Close, "Close menu", tint = Ink)
+                    }
+                }
+            }
+            Text(
+                "Map-first place vibes. No account needed to explore or submit.",
+                color = MutedInk, fontSize = 15.sp, lineHeight = 20.sp,
+                modifier = Modifier.padding(top = 12.dp, bottom = 15.dp),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Language, null, tint = Ink, modifier = Modifier.size(21.dp))
+                Spacer(Modifier.width(9.dp))
+                Text("Language", fontWeight = FontWeight.Black, fontSize = 17.sp)
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 10.dp),
+                shape = RoundedCornerShape(50), color = BrandNavy.copy(alpha = 0.06f),
+            ) {
+                Row(Modifier.padding(3.dp)) {
+                    Surface(Modifier.weight(1f), shape = RoundedCornerShape(50), color = Color.White, shadowElevation = 1.dp) {
+                        Text("English", Modifier.padding(vertical = 8.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontWeight = FontWeight.SemiBold)
+                    }
+                    Text("Español", Modifier.weight(1f).padding(vertical = 8.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center, color = MutedInk.copy(alpha = 0.55f))
+                }
+            }
+            AppMenuRow(Icons.Default.Person, "Create or sign in", "Email links only. No password needed.", BrandNavy, onAccount)
+            Divider(color = BrandNavy.copy(alpha = 0.07f))
+            AppMenuRow(Icons.Default.Description, "Privacy Policy", null, MutedInk) { openWebPage(context, "https://vibesyall.com/privacy") }
+            AppMenuRow(Icons.Default.Description, "Terms of Use", null, MutedInk) { openWebPage(context, "https://vibesyall.com/terms") }
+            AppMenuRow(Icons.Default.Help, "Support", null, MutedInk) { openWebPage(context, "https://vibesyall.com/support") }
+            Divider(color = BrandNavy.copy(alpha = 0.07f))
+            AppMenuRow(Icons.Default.Delete, "Delete account", "Delete the optional account tied to this device and email.", MaterialTheme.colorScheme.error, onDeleteAccount)
+        }
+    }
+}
+
+@Composable
+private fun AppMenuRow(icon: ImageVector, title: String, subtitle: String?, iconColor: Color, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(shape = CircleShape, color = iconColor.copy(alpha = 0.1f)) {
+            Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = iconColor, modifier = Modifier.size(21.dp))
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.Black, fontSize = 17.sp, color = Ink)
+            subtitle?.let { Text(it, color = MutedInk, fontSize = 12.5.sp, lineHeight = 15.sp) }
+        }
+        Icon(Icons.Default.ChevronRight, null, tint = MutedInk.copy(alpha = 0.7f))
+    }
+}
+
+@Composable
 private fun AccountSheet(
     eligibility: com.brianhakel.vibesyall.data.AccountEligibility?,
     message: String?,
@@ -1057,12 +1202,12 @@ private fun AccountSheet(
     var confirmDelete by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Sheet) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 10.dp)
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp)
                 .padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
         ) {
-            Image(painterResource(R.drawable.brand_logo), null, Modifier.size(64.dp).clip(CircleShape))
-            Spacer(Modifier.height(10.dp))
-            Text("Keep your vibes with you", fontWeight = FontWeight.Black, fontSize = 26.sp)
+            Image(painterResource(R.drawable.brand_logo), null, Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)))
+            Spacer(Modifier.height(8.dp))
+            Text("Keep your vibes with you", fontWeight = FontWeight.Black, fontSize = 24.sp)
             val progress = eligibility?.let {
                 if (it.eligible) "You’ve vibed ${it.vibedPlaceCount} places. Account backup is unlocked."
                 else "${it.remainingPlaces} more places unlock account backup. Signup stays optional."
@@ -1123,6 +1268,10 @@ private fun openDirections(context: Context, place: VibePlace) {
     val intent = Intent(Intent.ACTION_VIEW, uri).apply { setPackage("com.google.android.apps.maps") }
     if (intent.resolveActivity(context.packageManager) != null) context.startActivity(intent)
     else context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps/search/?api=1&query=${place.latitude},${place.longitude}")))
+}
+
+private fun openWebPage(context: Context, url: String) {
+    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
 }
 
 private fun sharePlace(context: Context, place: VibePlace) {
