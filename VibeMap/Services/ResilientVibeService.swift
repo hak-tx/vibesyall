@@ -25,6 +25,32 @@ final class ResilientVibeService: VibeServicing {
         }
     }
 
+    func searchSavedPlaces(
+        query: String,
+        latitude: Double?,
+        longitude: Double?,
+        limit: Int,
+        deviceIdHash: String?
+    ) async throws -> [VibePlace] {
+        try await runWithConnectivityFallback {
+            try await primary.searchSavedPlaces(
+                query: query,
+                latitude: latitude,
+                longitude: longitude,
+                limit: limit,
+                deviceIdHash: deviceIdHash
+            )
+        } fallback: {
+            try await fallback.searchSavedPlaces(
+                query: query,
+                latitude: latitude,
+                longitude: longitude,
+                limit: limit,
+                deviceIdHash: deviceIdHash
+            )
+        }
+    }
+
     func fetchMapCells(latitude: Double, longitude: Double, radius: Double, cellSize: Double, vibeFilter: VibeTag?) async throws -> [MapCellCluster] {
         try await runWithConnectivityFallback {
             try await primary.fetchMapCells(latitude: latitude, longitude: longitude, radius: radius, cellSize: cellSize, vibeFilter: vibeFilter)
@@ -55,6 +81,10 @@ final class ResilientVibeService: VibeServicing {
 
     func submitRating(placeId: String, deviceIdHash: String, vibeTags: [VibeTag]) async throws -> RatingSubmission {
         try await primary.submitRating(placeId: placeId, deviceIdHash: deviceIdHash, vibeTags: vibeTags)
+    }
+
+    func deleteRating(placeId: String, deviceIdHash: String) async throws -> VibePlace {
+        try await primary.deleteRating(placeId: placeId, deviceIdHash: deviceIdHash)
     }
 
     func fetchAccountEligibility(deviceIdHash: String) async throws -> AccountEligibility {

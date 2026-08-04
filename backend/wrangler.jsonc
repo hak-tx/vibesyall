@@ -14,11 +14,48 @@
 		"mode": "smart"
 	},
 	"workers_dev": true,
+	"triggers": {
+		"crons": [
+			"* * * * *"
+		]
+	},
 	"d1_databases": [
 		{
 			"binding": "DB",
 			"database_name": "vibe-map",
 			"database_id": "bc6e2572-c04d-4178-9f46-4998b9b1ddc3"
+		}
+	],
+	"ratelimits": [
+		{
+			"name": "AUTH_RATE_LIMITER",
+			"namespace_id": "210001",
+			"simple": { "limit": 6, "period": 60 }
+		},
+		{
+			"name": "ANALYTICS_DEVICE_RATE_LIMITER",
+			"namespace_id": "210002",
+			"simple": { "limit": 120, "period": 60 }
+		},
+		{
+			"name": "ANALYTICS_IP_RATE_LIMITER",
+			"namespace_id": "210003",
+			"simple": { "limit": 600, "period": 60 }
+		},
+		{
+			"name": "SEARCH_RATE_LIMITER",
+			"namespace_id": "210004",
+			"simple": { "limit": 60, "period": 60 }
+		},
+		{
+			"name": "WRITE_DEVICE_RATE_LIMITER",
+			"namespace_id": "210005",
+			"simple": { "limit": 30, "period": 60 }
+		},
+		{
+			"name": "WRITE_IP_RATE_LIMITER",
+			"namespace_id": "210006",
+			"simple": { "limit": 120, "period": 60 }
 		}
 	],
 	"send_email": [

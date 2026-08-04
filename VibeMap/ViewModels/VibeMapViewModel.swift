@@ -6,6 +6,7 @@ import MapKit
 final class VibeMapViewModel: ObservableObject {
     @Published var searchQuery = ""
     @Published private(set) var searchResults: [PlaceCandidate] = []
+    @Published private(set) var savedPlaceSearchResults: [VibePlace] = []
     @Published private(set) var nearbyPlaces: [VibePlace] = []
     @Published private(set) var mapCellClusters: [MapCellCluster] = []
     @Published private(set) var allowedVibes = VibeTag.allCases
@@ -38,6 +39,7 @@ final class VibeMapViewModel: ObservableObject {
     private var visibleCenter = AppConfig.initialMapCenter
     private var visibleRadius = AppConfig.nearbyRadiusMeters
     private var activeMapTapRequestID: UUID?
+    private var activeSearchRequestID: UUID?
     private var activeNearbyRequestID: UUID?
     private var activeNearbyRequestKey: String?
     private var shouldCheckAccountAfterRating = false
@@ -148,6 +150,21 @@ final class VibeMapViewModel: ObservableObject {
         rankedSearchResults(applyingVibeFilters: true)
     }
 
+    var primarySearchResults: [PlaceSearchResult] {
+        let results = filteredSearchResults
+        guard PlaceSearchQueryIntent.isSpecificNameSearch(searchQuery), results.count > 1 else {
+            return results
+        }
+        return Array(results.prefix(1))
+    }
+
+    var relatedSearchResults: [PlaceSearchResult] {
+        guard PlaceSearchQueryIntent.isSpecificNameSearch(searchQuery) else {
+            return []
+        }
+        return Array(filteredSearchResults.dropFirst())
+    }
+
     var hasActiveVibeFilters: Bool {
         !selectedVibeFilters.isEmpty
     }
@@ -159,7 +176,9 @@ final class VibeMapViewModel: ObservableObject {
     }
 
     var selectedVibeFilterSummary: String {
-        VibeTag.bestToWorst(Array(selectedVibeFilters)).map(\.mapLabel).joined(separator: " or ")
+        VibeTag.bestToWorst(Array(selectedVibeFilters))
+            .map(\.mapLabel)
+            .joined(separator: L10n.string(" or "))
     }
 
     init(
@@ -344,32 +363,53 @@ final class VibeMapViewModel: ObservableObject {
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard query.count >= 2 else {
             searchResults = []
+            savedPlaceSearchResults = []
             searchError = nil
             return
         }
 
+        let requestID = UUID()
+        activeSearchRequestID = requestID
         searchError = nil
         isSearching = true
         clearMapTapChoices()
 
-        do {
-            let results = try await searchService.search(query: query, near: visibleCenter)
-            searchResults = results
-            trackSearchIfNeeded(query: query, resultCount: results.count)
-        } catch is CancellationError {
+        async let providerResults = try? searchService.search(query: query, near: visibleCenter)
+        async let savedResults = try? vibeService.searchSavedPlaces(
+            query: query,
+            latitude: visibleCenter.latitude,
+            longitude: visibleCenter.longitude,
+            limit: 12,
+            deviceIdHash: identityService.deviceIDHash()
+        )
+        let results = await providerResults ?? []
+        let reviewedPlaces = await savedResults ?? []
+
+        guard !Task.isCancelled else {
             return
-        } catch {
-            searchResults = []
-            searchError = error.localizedDescription
+        }
+        guard activeSearchRequestID == requestID,
+              searchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else {
+            return
         }
 
-        isSearching = false
+        searchResults = results
+        savedPlaceSearchResults = reviewedPlaces
+        searchError = nil
+        trackSearchIfNeeded(query: query, resultCount: filteredSearchResults.count)
+
+        if activeSearchRequestID == requestID {
+            isSearching = false
+        }
     }
 
     func clearSearch() {
+        activeSearchRequestID = nil
         searchQuery = ""
         searchResults = []
+        savedPlaceSearchResults = []
         searchError = nil
+        isSearching = false
     }
 
     func setVibeFilter(_ vibe: VibeTag?) {
@@ -425,14 +465,14 @@ final class VibeMapViewModel: ObservableObject {
                 await select(match.candidate, opensRating: true)
             } else {
                 mapTapMatches = []
-                mapTapError = "No map places found here."
+                mapTapError = L10n.string("No map places found here.")
             }
         } catch is CancellationError {
             return
         } catch {
             guard activeMapTapRequestID == requestID else { return }
             mapTapMatches = []
-            mapTapError = "Could not load that place. Try searching its name."
+            mapTapError = L10n.string("Could not load that place. Try searching its name.")
         }
 
         isResolvingMapTap = false
@@ -459,14 +499,14 @@ final class VibeMapViewModel: ObservableObject {
                 await select(match.candidate, opensRating: true)
             } else {
                 mapTapMatches = []
-                mapTapError = "Could not load that place. Try searching its name."
+                mapTapError = L10n.string("Could not load that place. Try searching its name.")
             }
         } catch is CancellationError {
             return
         } catch {
             guard activeMapTapRequestID == requestID else { return }
             mapTapMatches = []
-            mapTapError = "Could not load that place. Try searching its name."
+            mapTapError = L10n.string("Could not load that place. Try searching its name.")
         }
 
         isResolvingMapTap = false
@@ -577,6 +617,33 @@ final class VibeMapViewModel: ObservableObject {
         )
         schedulePendingRatingSync()
         return optimisticSubmission
+    }
+
+    func deleteRating() async throws -> VibePlace {
+        guard let selectedPlace, selectedPlace.myRating != nil else {
+            throw APIError.server("There are no vibes to delete here.")
+        }
+
+        let activeSyncTask = pendingRatingSyncTask
+        activeSyncTask?.cancel()
+        await activeSyncTask?.value
+        pendingRatingSyncTask = nil
+        removePendingRatingSubmissions(for: selectedPlace.id)
+
+        var deletedPlace = try await vibeService.deleteRating(
+            placeId: selectedPlace.id,
+            deviceIdHash: identityService.deviceIDHash()
+        )
+        if deletedPlace.distanceMeters == nil {
+            deletedPlace.distanceMeters = selectedPlace.distanceMeters
+        }
+
+        contributedPlaceIDs.remove(selectedPlace.id)
+        UserDefaults.standard.set(Array(contributedPlaceIDs), forKey: contributedPlaceIDsKey)
+        invalidateAnnotationCaches()
+        applyPlaceUpdate(deletedPlace, replacing: selectedPlace.id)
+        upsertNearbyPlace(deletedPlace)
+        return deletedPlace
     }
 
     private func optimisticRatingSubmission(
@@ -705,6 +772,11 @@ final class VibeMapViewModel: ObservableObject {
         }
 
         while let pendingSubmission = loadPendingRatingSubmissions().first {
+            guard !Task.isCancelled else {
+                shouldContinueSyncing = false
+                return
+            }
+
             do {
                 let syncedPlace = try await vibeService.upsertPlace(pendingSubmission.candidate)
                 let submission = try await vibeService.submitRating(
@@ -717,11 +789,14 @@ final class VibeMapViewModel: ObservableObject {
                     submission,
                     replacingLocalPlaceID: pendingSubmission.localPlaceID
                 )
+            } catch is CancellationError {
+                shouldContinueSyncing = false
+                return
             } catch {
                 shouldContinueSyncing = false
                 alert = AppAlert(
-                    title: "Still saving",
-                    message: "Your vibe is saved on this device and will retry when the connection improves."
+                    title: L10n.string("Still saving"),
+                    message: L10n.string("Your vibe is saved on this device and will retry when the connection improves.")
                 )
                 return
             }
@@ -781,6 +856,15 @@ final class VibeMapViewModel: ObservableObject {
         var submissions = loadPendingRatingSubmissions()
         submissions.removeAll { $0.id == id }
         savePendingRatingSubmissions(submissions)
+    }
+
+    private func removePendingRatingSubmissions(for placeID: String) {
+        var submissions = loadPendingRatingSubmissions()
+        submissions.removeAll { $0.localPlaceID == placeID }
+        savePendingRatingSubmissions(submissions)
+        if !submissions.isEmpty {
+            schedulePendingRatingSync()
+        }
     }
 
     private func invalidateAnnotationCaches() {
@@ -850,11 +934,14 @@ final class VibeMapViewModel: ObservableObject {
     func requestAccountLogout() async {
         do {
             _ = try await vibeService.requestAccountLogout()
-            alert = AppAlert(title: "Logged out", message: "You can keep using VIBES Y'ALL anonymously on this device.")
+            alert = AppAlert(
+                title: L10n.string("Logged out"),
+                message: L10n.string("You can keep using VIBES Y'ALL anonymously on this device.")
+            )
         } catch {
             alert = AppAlert(
-                title: "Logged out locally",
-                message: "The server session could not be reached, but this device is no longer using the account session."
+                title: L10n.string("Logged out locally"),
+                message: L10n.string("The server session could not be reached, but this device is no longer using the account session.")
             )
         }
 
@@ -872,8 +959,8 @@ final class VibeMapViewModel: ObservableObject {
             if let sessionToken = eligibility.sessionToken {
                 saveAccountSessionToken(sessionToken)
                 alert = AppAlert(
-                    title: "Account saved",
-                    message: "Your confirmed account is active on this device."
+                    title: L10n.string("Account saved"),
+                    message: L10n.string("Your confirmed account is active on this device.")
                 )
                 return
             }
@@ -886,16 +973,21 @@ final class VibeMapViewModel: ObservableObject {
 
             if hasConfirmedAccount {
                 alert = AppAlert(
-                    title: "Account saved",
-                    message: "Your confirmed account is active on this device."
+                    title: L10n.string("Account saved"),
+                    message: L10n.string("Your confirmed account is active on this device.")
                 )
                 return
             }
 
             guard eligibility.eligible else {
                 alert = AppAlert(
-                    title: "Keep vibing",
-                    message: "Account backup unlocks after \(eligibility.threshold) vibed places. You have \(eligibility.vibedPlaceCount), so \(eligibility.remainingPlaces) more to go."
+                    title: L10n.string("Keep vibing"),
+                    message: L10n.format(
+                        "Account backup unlocks after %d vibed places. You have %d, so %d more to go.",
+                        eligibility.threshold,
+                        eligibility.vibedPlaceCount,
+                        eligibility.remainingPlaces
+                    )
                 )
                 return
             }
@@ -903,7 +995,7 @@ final class VibeMapViewModel: ObservableObject {
             UserDefaults.standard.set(false, forKey: accountPromptDismissedKey)
             accountSignupPrompt = AccountSignupPrompt(eligibility: eligibility)
         } catch {
-            alert = AppAlert(title: "Could not check account status", message: error.localizedDescription)
+            alert = AppAlert(title: L10n.string("Could not check account status"), message: error.localizedDescription)
         }
     }
 
@@ -922,7 +1014,7 @@ final class VibeMapViewModel: ObservableObject {
                 "deleted": response.deleted ? "true" : "false"
             ]
         )
-        alert = AppAlert(title: "Account deleted", message: response.message)
+        alert = AppAlert(title: L10n.string("Account deleted"), message: L10n.serverMessage(response.message))
         return response
     }
 
@@ -938,8 +1030,8 @@ final class VibeMapViewModel: ObservableObject {
 
         saveAccountSessionToken(session)
         alert = AppAlert(
-            title: "Account confirmed",
-            message: "Your past and future vibes can now stay tied to your account."
+            title: L10n.string("Account confirmed"),
+            message: L10n.string("Your past and future vibes can now stay tied to your account.")
         )
     }
 
@@ -950,7 +1042,16 @@ final class VibeMapViewModel: ObservableObject {
         clearSearch()
         clearMapTapChoices()
 
-        let place = (knownPlace ?? existingNearbyPlace(for: candidate))?.enriched(with: candidate) ?? VibePlace(candidate: candidate)
+        let place: VibePlace
+        if let knownPlace = knownPlace ?? existingKnownPlace(for: candidate) {
+            place = knownPlace.enriched(with: candidate)
+        } else {
+            do {
+                place = try await vibeService.upsertPlace(candidate).enriched(with: candidate)
+            } catch {
+                place = VibePlace(candidate: candidate)
+            }
+        }
         selectedPlace = place
         if place.myRating != nil {
             markContribution(for: place)
@@ -964,7 +1065,9 @@ final class VibeMapViewModel: ObservableObject {
             )
         }
 
-        persistEnrichedPlaceIfUseful(place, sourceCandidate: candidate)
+        if knownPlace != nil {
+            persistEnrichedPlaceIfUseful(place, sourceCandidate: candidate)
+        }
     }
 
     private func recordAppOpenIfNeeded() {
@@ -1051,7 +1154,10 @@ final class VibeMapViewModel: ObservableObject {
 
     private func loadAllowedVibes() async {
         do {
-            allowedVibes = try await vibeService.fetchVibes()
+            let serverVibes = try await vibeService.fetchVibes()
+            allowedVibes = VibeTag.allCases.filter {
+                serverVibes.contains($0) || $0 == .bougie || $0 == .lowKey
+            }
         } catch {
             allowedVibes = VibeTag.allCases
         }
@@ -1474,6 +1580,9 @@ final class VibeMapViewModel: ObservableObject {
             nearbyPlaces[index] = place
             displayedNearbySignature = Self.nearbySignature(nearbyPlaces)
         }
+        if let index = savedPlaceSearchResults.firstIndex(where: { $0.id == placeID }) {
+            savedPlaceSearchResults[index] = place
+        }
         updateCachedPlace(place, replacing: placeID)
     }
 
@@ -1487,16 +1596,20 @@ final class VibeMapViewModel: ObservableObject {
         var seenPlaceIDs = Set<String>()
         var seenCandidateIDs = Set<String>()
 
-        let localMatches = nearbyPlaces
+        let localMatches = (savedPlaceSearchResults + nearbyPlaces)
+            .uniquedByPlaceID()
             .filter { place in
                 place.hasRatings &&
-                    place.matchesSearchQuery(query) &&
+                    place.matchesSearchQuery(query, requireStrongNameMatch: PlaceSearchQueryIntent.isSpecificNameSearch(query)) &&
                     (!applyingVibeFilters || place.matchesAnyVibe(in: selectedVibeFilters))
             }
-            .sortedByDistance(from: visibleCenter)
+            .sorted {
+                distanceFromVisibleCenter(to: $0.coordinate) < distanceFromVisibleCenter(to: $1.coordinate)
+            }
 
         for place in localMatches {
-            results.append(PlaceSearchResult(candidate: place.placeCandidate, vibedPlace: place))
+            let displayPlace = placeWithVisibleDistance(place)
+            results.append(PlaceSearchResult(candidate: displayPlace.placeCandidate, vibedPlace: displayPlace))
             seenPlaceIDs.insert(place.id)
             seenCandidateIDs.insert(place.placeCandidate.id)
         }
@@ -1504,14 +1617,20 @@ final class VibeMapViewModel: ObservableObject {
         var plainCandidates: [PlaceSearchResult] = []
 
         for candidate in searchResults {
-            if let place = existingNearbyPlace(for: candidate), place.hasRatings {
+            if PlaceSearchQueryIntent.isSpecificNameSearch(query),
+               !PlaceNameSearchMatcher.matchTier(query: query, candidateName: candidate.name).isStrongMatch {
+                continue
+            }
+
+            if let place = existingKnownPlace(for: candidate), place.hasRatings {
                 guard !applyingVibeFilters || place.matchesAnyVibe(in: selectedVibeFilters) else {
                     continue
                 }
 
                 let enrichedPlace = place.enriched(with: candidate)
                 if !seenPlaceIDs.contains(enrichedPlace.id) {
-                    results.append(PlaceSearchResult(candidate: enrichedPlace.placeCandidate, vibedPlace: enrichedPlace))
+                    let displayPlace = placeWithVisibleDistance(enrichedPlace)
+                    results.append(PlaceSearchResult(candidate: displayPlace.placeCandidate, vibedPlace: displayPlace))
                     seenPlaceIDs.insert(enrichedPlace.id)
                     seenCandidateIDs.insert(candidate.id)
                 }
@@ -1526,7 +1645,7 @@ final class VibeMapViewModel: ObservableObject {
                 continue
             }
 
-            plainCandidates.append(PlaceSearchResult(candidate: candidate, vibedPlace: nil))
+            plainCandidates.append(PlaceSearchResult(candidate: candidateWithVisibleDistance(candidate), vibedPlace: nil))
             seenCandidateIDs.insert(candidate.id)
         }
 
@@ -1534,15 +1653,25 @@ final class VibeMapViewModel: ObservableObject {
     }
 
     private func sortedSearchResults(_ results: [PlaceSearchResult], query: String) -> [PlaceSearchResult] {
-        results.sorted { lhs, rhs in
-            if lhs.hasCommunityVibes != rhs.hasCommunityVibes {
-                return lhs.hasCommunityVibes
+        let preferDistance = Self.prefersDistanceRanking(for: query)
+
+        return results.sorted { lhs, rhs in
+            if preferDistance {
+                let lhsDistance = distanceFromVisibleCenter(to: lhs)
+                let rhsDistance = distanceFromVisibleCenter(to: rhs)
+                if abs(lhsDistance - rhsDistance) > 250 {
+                    return lhsDistance < rhsDistance
+                }
             }
 
             let lhsRelevance = Self.searchRelevance(for: lhs, query: query)
             let rhsRelevance = Self.searchRelevance(for: rhs, query: query)
             if lhsRelevance != rhsRelevance {
                 return lhsRelevance < rhsRelevance
+            }
+
+            if lhs.hasCommunityVibes != rhs.hasCommunityVibes {
+                return lhs.hasCommunityVibes
             }
 
             let lhsDistance = distanceFromVisibleCenter(to: lhs)
@@ -1556,16 +1685,32 @@ final class VibeMapViewModel: ObservableObject {
     }
 
     private func distanceFromVisibleCenter(to result: PlaceSearchResult) -> CLLocationDistance {
-        if let distanceMeters = result.vibedPlace?.distanceMeters ?? result.candidate.distanceMeters {
-            return distanceMeters
-        }
-
         let coordinate = result.vibedPlace?.coordinate ?? result.candidate.coordinate
+        return distanceFromVisibleCenter(to: coordinate)
+    }
+
+    private func distanceFromVisibleCenter(to coordinate: CLLocationCoordinate2D) -> CLLocationDistance {
         return CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
             .distance(from: CLLocation(latitude: visibleCenter.latitude, longitude: visibleCenter.longitude))
     }
 
+    private func placeWithVisibleDistance(_ place: VibePlace) -> VibePlace {
+        var displayPlace = place
+        displayPlace.distanceMeters = distanceFromVisibleCenter(to: place.coordinate)
+        return displayPlace
+    }
+
+    private func candidateWithVisibleDistance(_ candidate: PlaceCandidate) -> PlaceCandidate {
+        var displayCandidate = candidate
+        displayCandidate.distanceMeters = distanceFromVisibleCenter(to: candidate.coordinate)
+        return displayCandidate
+    }
+
     private static func searchRelevance(for result: PlaceSearchResult, query: String) -> Int {
+        if PlaceSearchQueryIntent.isSpecificNameSearch(query) {
+            return PlaceNameSearchMatcher.matchTier(query: query, candidateName: result.name).rawValue
+        }
+
         let normalizedQuery = query.normalizedForSearch()
         guard !normalizedQuery.isEmpty else {
             return 5
@@ -1606,15 +1751,80 @@ final class VibeMapViewModel: ObservableObject {
         return 4
     }
 
-    private func existingNearbyPlace(for candidate: PlaceCandidate) -> VibePlace? {
+    private static func prefersDistanceRanking(for query: String) -> Bool {
+        let tokens = query.normalizedSearchTokens()
+        guard !tokens.isEmpty else {
+            return false
+        }
+
+        return tokens.allSatisfy { token in
+            broadSearchIntentTokens.contains(token) ||
+                (token.hasSuffix("s") && broadSearchIntentTokens.contains(String(token.dropLast())))
+        }
+    }
+
+    private static let broadSearchIntentTokens: Set<String> = [
+        "atm",
+        "asian",
+        "bakery",
+        "bar",
+        "bars",
+        "bbq",
+        "breakfast",
+        "brewery",
+        "burger",
+        "burgers",
+        "cafe",
+        "cafes",
+        "cajun",
+        "chinese",
+        "coffee",
+        "dinner",
+        "drink",
+        "drinks",
+        "entertainment",
+        "food",
+        "gas",
+        "grocery",
+        "groceries",
+        "gym",
+        "hotel",
+        "hotels",
+        "italian",
+        "lunch",
+        "mexican",
+        "movie",
+        "movies",
+        "museum",
+        "museums",
+        "park",
+        "parks",
+        "pharmacy",
+        "pizza",
+        "restaurant",
+        "restaurants",
+        "shop",
+        "shopping",
+        "shops",
+        "store",
+        "stores",
+        "taco",
+        "tacos",
+        "theater",
+        "theatre"
+    ]
+
+    private func existingKnownPlace(for candidate: PlaceCandidate) -> VibePlace? {
+        let knownPlaces = (savedPlaceSearchResults + nearbyPlaces).uniquedByPlaceID()
+
         if let providerPlaceId = candidate.providerPlaceId, !providerPlaceId.isEmpty {
-            if let exactProviderMatch = nearbyPlaces.first(where: {
+            if let exactProviderMatch = knownPlaces.first(where: {
                 $0.provider == candidate.provider && $0.providerPlaceId == providerPlaceId
             }) {
                 return exactProviderMatch
             }
 
-            if let providerMatch = nearbyPlaces.first(where: { $0.providerPlaceId == providerPlaceId }) {
+            if let providerMatch = knownPlaces.first(where: { $0.providerPlaceId == providerPlaceId }) {
                 return providerMatch
             }
         }
@@ -1623,7 +1833,7 @@ final class VibeMapViewModel: ObservableObject {
         let candidateLocation = CLLocation(latitude: candidate.latitude, longitude: candidate.longitude)
         let candidateStreet = Self.normalizedPlaceAddress(candidate.streetAddress)
 
-        return nearbyPlaces
+        return knownPlaces
             .compactMap { place -> (place: VibePlace, distance: CLLocationDistance, score: Int)? in
                 let placeName = Self.normalizedPlaceName(place.name)
                 let exactNameMatch = placeName == candidateName
@@ -1691,8 +1901,19 @@ final class VibeMapViewModel: ObservableObject {
     }
 }
 
+private extension Array where Element == VibePlace {
+    func uniquedByPlaceID() -> [VibePlace] {
+        var seen = Set<String>()
+        return filter { seen.insert($0.id).inserted }
+    }
+}
+
 private extension VibePlace {
-    func matchesSearchQuery(_ query: String) -> Bool {
+    func matchesSearchQuery(_ query: String, requireStrongNameMatch: Bool) -> Bool {
+        if requireStrongNameMatch {
+            return PlaceNameSearchMatcher.matchTier(query: query, candidateName: name).isStrongMatch
+        }
+
         let queryTokens = query.normalizedSearchTokens()
         guard !queryTokens.isEmpty else {
             return false
@@ -1723,19 +1944,10 @@ private extension VibePlace {
 private extension Array where Element == VibePlace {
     func sortedByDistance(from coordinate: CLLocationCoordinate2D) -> [VibePlace] {
         sorted { lhs, rhs in
-            switch (lhs.distanceMeters, rhs.distanceMeters) {
-            case let (lhsDistance?, rhsDistance?):
-                return lhsDistance < rhsDistance
-            case (.some, nil):
-                return true
-            case (nil, .some):
-                return false
-            case (nil, nil):
-                let origin = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-                let lhsDistance = CLLocation(latitude: lhs.latitude, longitude: lhs.longitude).distance(from: origin)
-                let rhsDistance = CLLocation(latitude: rhs.latitude, longitude: rhs.longitude).distance(from: origin)
-                return lhsDistance < rhsDistance
-            }
+            let origin = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            let lhsDistance = CLLocation(latitude: lhs.latitude, longitude: lhs.longitude).distance(from: origin)
+            let rhsDistance = CLLocation(latitude: rhs.latitude, longitude: rhs.longitude).distance(from: origin)
+            return lhsDistance < rhsDistance
         }
     }
 }
@@ -1749,9 +1961,6 @@ private extension String {
     }
 
     func normalizedForSearch() -> String {
-        lowercased()
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+        PlaceNameSearchMatcher.normalized(self)
     }
 }

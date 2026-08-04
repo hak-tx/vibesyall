@@ -15,10 +15,10 @@ struct AccountEligibility: Decodable, Hashable {
 
     var progressText: String {
         if eligible {
-            return "You have vibed \(vibedPlaceCount) places."
+            return L10n.format("You have vibed %d places.", vibedPlaceCount)
         }
 
-        return "\(remainingPlaces) more places unlock account backup."
+        return L10n.format("%d more places unlock account backup.", remainingPlaces)
     }
 }
 
@@ -85,4 +85,8 @@ enum AccountBenefit {
         "Edit older vibes when your opinion changes.",
         "Help keep the map authentic and harder to spam."
     ]
+
+    static var localizedDefaultBenefits: [String] {
+        defaultBenefits.map(L10n.string)
+    }
 }

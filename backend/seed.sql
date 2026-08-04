@@ -5,12 +5,14 @@ INSERT OR REPLACE INTO vibe_tags (id, slug, display_name, emoji, sentiment_group
   ('iconic', 'iconic', 'Iconic', '🌟', 'identity', 40, 1),
   ('hidden_gem', 'hidden_gem', 'Hidden Gem', '💎', 'positive', 50, 1),
   ('underrated', 'underrated', 'Underrated', '📈', 'positive', 60, 1),
-  ('mid', 'mid', 'Mid', '😐', 'neutral', 70, 1),
-  ('chaos', 'chaos', 'Chaos', '🌪', 'neutral', 80, 1),
-  ('overrated', 'overrated', 'Overrated', '👎', 'negative', 90, 1),
-  ('tourist_trap', 'tourist_trap', 'Tourist Trap', '📸', 'negative', 100, 1),
-  ('needs_prayer', 'needs_prayer', 'Needs Prayer', '🙏', 'negative', 110, 1),
-  ('emotionally_damaging', 'emotionally_damaging', 'Emotionally Damaging', '💀', 'negative', 120, 1);
+  ('bougie', 'bougie', 'Bougie', '👑', 'identity', 70, 1),
+  ('low_key', 'low_key', 'Low-key', '🌿', 'identity', 80, 1),
+  ('mid', 'mid', 'Mid', '😐', 'neutral', 90, 1),
+  ('chaos', 'chaos', 'Chaos', '🌪', 'neutral', 100, 1),
+  ('overrated', 'overrated', 'Overrated', '👎', 'negative', 110, 1),
+  ('tourist_trap', 'tourist_trap', 'Tourist Trap', '📸', 'negative', 120, 1),
+  ('needs_prayer', 'needs_prayer', 'Needs Prayer', '🙏', 'negative', 130, 1),
+  ('emotionally_damaging', 'emotionally_damaging', 'Emotionally Damaging', '💀', 'negative', 140, 1);
 
 INSERT OR REPLACE INTO places (
   id, provider, provider_place_id, name, latitude, longitude, street_address, city, region, country, category, created_at, updated_at

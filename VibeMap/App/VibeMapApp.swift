@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct VibeMapApp: App {
     @StateObject private var viewModel: VibeMapViewModel
+    @StateObject private var languageStore = AppLanguageStore()
 
     init() {
         let apiService = VibeAPIClient(baseURL: AppConfig.backendBaseURL)
@@ -26,6 +27,8 @@ struct VibeMapApp: App {
     var body: some Scene {
         WindowGroup {
             VibeMapView(viewModel: viewModel)
+                .environmentObject(languageStore)
+                .environment(\.locale, languageStore.language.locale)
                 .tint(VibeDesign.primary)
                 .preferredColorScheme(.light)
                 .environment(\.colorScheme, .light)

@@ -7,7 +7,7 @@ struct MapTapChoicesPanel: View {
         BottomPanel {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .center) {
-                    Text("Choose spot")
+                    Text(L10n.string("Choose spot"))
                         .font(.headline)
                         .foregroundStyle(VibeDesign.primaryText)
 
@@ -21,7 +21,7 @@ struct MapTapChoicesPanel: View {
                             .foregroundStyle(VibeDesign.secondaryText)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Close spot choices")
+                    .accessibilityLabel(L10n.string("Close spot choices"))
                 }
 
                 content
@@ -36,7 +36,7 @@ struct MapTapChoicesPanel: View {
                 ProgressView()
                     .controlSize(.small)
 
-                Text("Finding places")
+                Text(L10n.string("Finding places"))
                     .font(.subheadline)
                     .foregroundStyle(VibeDesign.secondaryText)
             }

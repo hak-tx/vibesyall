@@ -12,7 +12,8 @@ struct AccountSignupSheet: View {
     @State private var errorMessage: String?
 
     private var benefits: [String] {
-        prompt.eligibility.benefits.isEmpty ? AccountBenefit.defaultBenefits : prompt.eligibility.benefits
+        let source = prompt.eligibility.benefits.isEmpty ? AccountBenefit.defaultBenefits : prompt.eligibility.benefits
+        return source.map(L10n.string)
     }
 
     private var isSignInMode: Bool {
@@ -20,19 +21,19 @@ struct AccountSignupSheet: View {
     }
 
     private var titleText: String {
-        isSignInMode ? "Sign in" : "Save your vibes"
+        L10n.string(isSignInMode ? "Sign in" : "Save your vibes")
     }
 
     private var detailText: String {
-        isSignInMode ? "No password needed. We'll email a secure sign-in link." : prompt.eligibility.progressText
+        isSignInMode ? L10n.string("No password needed. We'll email a secure sign-in link.") : prompt.eligibility.progressText
     }
 
     private var submitText: String {
         if statusMessage != nil {
-            return "Sent"
+            return L10n.string("Sent")
         }
 
-        return isSignInMode ? "Send sign-in link" : "Send confirmation"
+        return L10n.string(isSignInMode ? "Send sign-in link" : "Send confirmation")
     }
 
     private var canSubmit: Bool {
@@ -66,7 +67,7 @@ struct AccountSignupSheet: View {
                         .background(Color.black.opacity(0.045), in: Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Maybe later")
+                .accessibilityLabel(L10n.string("Maybe later"))
             }
 
             VStack(alignment: .leading, spacing: 9) {
@@ -76,7 +77,7 @@ struct AccountSignupSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                TextField("Email address", text: $email)
+                TextField(L10n.string("Email address"), text: $email)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -127,7 +128,7 @@ struct AccountSignupSheet: View {
                 viewModel.dismissAccountSignupPrompt()
                 dismiss()
             } label: {
-                Text(statusMessage == nil ? "Maybe later" : "Done")
+                Text(L10n.string(statusMessage == nil ? "Maybe later" : "Done"))
                     .font(.callout.weight(.bold))
                     .foregroundStyle(VibeDesign.secondaryText)
                     .frame(maxWidth: .infinity)
@@ -153,13 +154,13 @@ struct AccountSignupSheet: View {
             if isSignInMode {
                 let response = try await viewModel.requestAccountLogin(email: normalizedEmail)
                 statusMessage = response.emailSent
-                    ? "Check your email, tap the sign-in link, then return here."
-                    : response.message
+                    ? L10n.string("Check your email, tap the sign-in link, then return here.")
+                    : L10n.serverMessage(response.message)
             } else {
                 let response = try await viewModel.requestAccountSignup(email: normalizedEmail)
                 statusMessage = response.status == "confirmation_sent"
-                    ? "Check your email, confirm the link, then return here. We'll finish setup automatically."
-                    : response.message
+                    ? L10n.string("Check your email, confirm the link, then return here. We'll finish setup automatically.")
+                    : L10n.serverMessage(response.message)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -175,6 +176,7 @@ struct AppMenuSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @EnvironmentObject private var languageStore: AppLanguageStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -195,12 +197,25 @@ struct AppMenuSheet: View {
                         .background(Color.black.opacity(0.045), in: Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Close menu")
+                .accessibilityLabel(L10n.string("Close menu"))
             }
 
-            Text("Map-first place vibes. No account needed to explore or submit.")
+            Text(L10n.string("Map-first place vibes. No account needed to explore or submit."))
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(VibeDesign.secondaryText)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Label(L10n.string("Language"), systemImage: "globe")
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(VibeDesign.primaryText)
+
+                Picker(L10n.string("Language"), selection: $languageStore.language) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.displayName).tag(language)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
 
             VStack(spacing: 10) {
                 Button {
@@ -315,7 +330,7 @@ struct AccountDeletionSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Delete account")
+                Text(L10n.string("Delete account"))
                     .font(.largeTitle.weight(.black))
                     .foregroundStyle(VibeDesign.primaryText)
 
@@ -331,15 +346,15 @@ struct AccountDeletionSheet: View {
                         .background(Color.black.opacity(0.045), in: Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Close")
+                .accessibilityLabel(L10n.string("Close"))
             }
 
-            Text("This removes the optional email account linked to this device. Anonymous vibe events remain private and continue to count only in aggregate place stats.")
+            Text(L10n.string("This removes the optional email account linked to this device. Anonymous vibe events remain private and continue to count only in aggregate place stats."))
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(VibeDesign.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
 
-            TextField("Email address", text: $email)
+            TextField(L10n.string("Email address"), text: $email)
                 .keyboardType(.emailAddress)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -374,7 +389,7 @@ struct AccountDeletionSheet: View {
                             .tint(.white)
                     }
 
-                    Text(statusMessage == nil ? "Delete account" : "Deleted")
+                    Text(L10n.string(statusMessage == nil ? "Delete account" : "Deleted"))
                         .font(.headline.weight(.black))
                 }
                 .foregroundStyle(.white)
@@ -388,7 +403,7 @@ struct AccountDeletionSheet: View {
             Button {
                 dismiss()
             } label: {
-                Text(statusMessage == nil ? "Cancel" : "Done")
+                Text(L10n.string(statusMessage == nil ? "Cancel" : "Done"))
                     .font(.callout.weight(.bold))
                     .foregroundStyle(VibeDesign.secondaryText)
                     .frame(maxWidth: .infinity)
@@ -412,7 +427,7 @@ struct AccountDeletionSheet: View {
 
         do {
             let response = try await viewModel.requestAccountDeletion(email: normalizedEmail)
-            statusMessage = response.message
+            statusMessage = L10n.serverMessage(response.message)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -435,12 +450,12 @@ private struct MenuActionRow: View {
                 .background(tint.opacity(0.10), in: Circle())
 
             VStack(alignment: .leading, spacing: subtitle == nil ? 0 : 2) {
-                Text(title)
+                Text(L10n.string(title))
                     .font(.headline.weight(.black))
                     .foregroundStyle(VibeDesign.primaryText)
 
                 if let subtitle {
-                    Text(subtitle)
+                    Text(L10n.string(subtitle))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(VibeDesign.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
@@ -469,7 +484,7 @@ private struct BenefitRow: View {
                 .foregroundStyle(VibeDesign.brandBlue)
                 .padding(.top, 1)
 
-            Text(text)
+            Text(L10n.string(text))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(VibeDesign.primaryText)
                 .fixedSize(horizontal: false, vertical: true)

@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "check": "npm run typecheck && wrangler deploy --dry-run",
+    "check": "npm run typecheck && npm run typecheck:test && npm test && wrangler deploy --dry-run",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "deploy": "wrangler deploy",
     "deploy:dry-run": "wrangler deploy --dry-run",
     "deploy:production": "node ./scripts/deploy-production.mjs",
@@ -16,11 +18,14 @@
     "db:migrate:remote": "wrangler d1 execute vibe-map --remote --file=./schema.sql",
     "db:migrate:production": "wrangler d1 execute vibe-map --remote --file=./schema.sql",
     "db:seed:local": "wrangler d1 execute vibe-map --local --file=./seed.sql",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc --project test/tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.18.8",
     "@types/node": "^26.0.0",
     "typescript": "^5.8.3",
+    "vitest": "^4.1.10",
     "wrangler": "^4.20.0"
   },
   "dependencies": {

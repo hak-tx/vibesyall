@@ -32,7 +32,7 @@ struct SelectedPlacePanel: View {
                                     .foregroundStyle(VibeDesign.secondaryText)
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("Close spot")
+                            .accessibilityLabel(L10n.string("Close spot"))
                         }
 
                         PlaceMetaActionRow(place: place)
@@ -69,7 +69,7 @@ struct SelectedPlacePanel: View {
                         Button {
                             viewModel.openRating()
                         } label: {
-                            Label(place.myRating == nil ? "Add vibe" : "Edit vibes", systemImage: "hand.thumbsup.fill")
+                            Label(L10n.string(place.myRating == nil ? "Add vibe" : "Edit vibes"), systemImage: "hand.thumbsup.fill")
                                 .font(.headline)
                                 .frame(maxWidth: .infinity)
                         }

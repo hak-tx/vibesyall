@@ -1,5 +1,13 @@
 import SwiftUI
 
+private struct RatingSheetContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct RatingSheetView: View {
     @ObservedObject var viewModel: VibeMapViewModel
     @Environment(\.dismiss) private var dismiss
@@ -10,95 +18,210 @@ struct RatingSheetView: View {
     @State private var revealedSubmission: RatingSubmission?
     @State private var isSubmitting = false
     @State private var errorMessage: String?
+    @State private var configuredDraftID: RatingDraft.ID?
+    @State private var measuredFormHeight: CGFloat = 0
+    @State private var showsAllTopVibes = false
+    @State private var showsDeleteConfirmation = false
 
     var body: some View {
         ratingForm
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .id(draft.id)
+            .fixedSize(horizontal: false, vertical: true)
             .background {
-                RatingSheetBackground(place: displayedPlace)
+                GeometryReader { contentGeometry in
+                    Color.clear
+                        .preference(
+                            key: RatingSheetContentHeightKey.self,
+                            value: contentGeometry.size.height
+                        )
+                }
             }
+        .background {
+            RatingSheetBackground(place: displayedPlace)
+        }
             .presentationDetents([.height(presentationHeight)])
-            .presentationBackground(VibeDesign.sheetBackground)
+            .presentationBackground(VibeDesign.ratingSheetSurface)
             .onAppear {
-                prefillExistingRatingIfNeeded()
+                configureForCurrentDraftIfNeeded()
+            }
+            .onChange(of: draft.id) { _, _ in
+                configureForCurrentDraftIfNeeded(force: true)
+            }
+            .onPreferenceChange(RatingSheetContentHeightKey.self) { height in
+                let roundedHeight = ceil(height)
+                guard roundedHeight > 0,
+                      abs(roundedHeight - measuredFormHeight) > 1 else {
+                    return
+                }
+
+                measuredFormHeight = roundedHeight
+            }
+            .alert(L10n.string("Delete your vibes?"), isPresented: $showsDeleteConfirmation) {
+                Button(L10n.string("Cancel"), role: .cancel) {}
+                Button(L10n.string("Delete"), role: .destructive) {
+                    Task {
+                        await deleteRating()
+                    }
+                }
+            } message: {
+                Text(L10n.string("This removes your vibe submission from this place."))
+            }
+            .alert(
+                L10n.string("Couldn't save changes"),
+                isPresented: operationErrorIsPresented
+            ) {
+                Button(L10n.string("OK"), role: .cancel) {
+                    errorMessage = nil
+                }
+            } message: {
+                Text(errorMessage ?? L10n.string("Please try again."))
             }
     }
 
     private var ratingForm: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            sheetGrip
+        VStack(alignment: .leading, spacing: 4) {
+            sheetHeader
             ratingToolbar
             ratingControls
         }
-        .padding(.top, 12)
-        .padding(.bottom, 10)
     }
 
-    private var sheetGrip: some View {
-        Capsule()
-            .fill(Color.black.opacity(0.18))
-            .frame(width: 42, height: 5)
-            .frame(maxWidth: .infinity)
-            .padding(.bottom, 8)
+    private var sheetHeader: some View {
+        ZStack {
+            Capsule()
+                .fill(Color.black.opacity(0.18))
+                .frame(width: 42, height: 5)
+
+            HStack {
+                Spacer(minLength: 0)
+                compactDoneButton
+            }
+        }
+        .frame(height: 36)
+        .padding(.horizontal, 18)
+    }
+
+    private var compactDoneButton: some View {
+        Button {
+            if revealedSubmission != nil {
+                closeSheet()
+            } else if isDeleteAction {
+                showsDeleteConfirmation = true
+            } else {
+                Task {
+                    await saveAndReveal()
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                if isSubmitting {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white)
+                }
+
+                Text(L10n.string("Done"))
+                    .font(.subheadline.weight(.black))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(Color.white)
+            .padding(.horizontal, 13)
+            .frame(height: 30)
+            .background(VibeDesign.primary, in: Capsule())
+            .frame(minWidth: 58, minHeight: 36)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isSubmitting)
+        .accessibilityHint(L10n.string("Saves your selected vibes and closes this card."))
     }
 
     private var ratingToolbar: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
                 header
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(alignment: .trailing, spacing: 7) {
-                    Button {
-                        viewModel.closeRatingFlow()
-                        dismiss()
-                    } label: {
-                        Text(revealedSubmission == nil ? "Cancel" : "Done")
-                    }
-                    .font(.headline)
-                    .fixedSize()
-                    .foregroundStyle(VibeDesign.primary)
-                    .padding(.top, 3)
+                compactShareCallout
+                    .frame(width: 94, alignment: .topTrailing)
+                    .layoutPriority(1)
+            }
 
-                    if displayedPlace.hasRatings && revealedSubmission == nil {
-                        CommunityPulseView(
-                            place: displayedPlace,
-                            maxItems: 2,
-                            layout: .vertical,
-                            showsCount: true,
-                            compact: true
-                        )
-                        .frame(maxWidth: 150, alignment: .trailing)
-                    }
-
-                    if revealedSubmission == nil {
-                        SharePlaceButton(
-                            place: displayedPlace,
-                            title: "Share",
-                            isCompact: true
-                        )
-                    }
-                }
-                .layoutPriority(1)
+            if revealedSubmission == nil, displayedPlace.hasRatings {
+                rankedVibeChips
             }
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 4)
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(VibeDesign.placeSummaryBackground)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(VibeDesign.brandBlue.opacity(0.72), lineWidth: 1.5)
+        }
+        .shadow(color: VibeDesign.primary.opacity(0.12), radius: 12, y: 5)
+        .padding(.horizontal, 18)
+        .padding(.top, revealedSubmission == nil ? 2 : 12)
+    }
+
+    private var compactShareCallout: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            Text(L10n.string("SHARE IT."))
+                .font(.system(size: 12.5, weight: .black, design: .default))
+                .foregroundStyle(VibeDesign.brandBlue)
+                .lineLimit(1)
+                .multilineTextAlignment(.trailing)
+
+            SharePlaceButton(
+                place: displayedPlace,
+                selectedTags: selectedTags,
+                title: L10n.string("Share"),
+                isCompact: true,
+                isDense: true,
+                showsNudge: false
+            )
+        }
+    }
+
+    private func closeSheet() {
+        viewModel.closeRatingFlow()
+        dismiss()
+    }
+
+    @ViewBuilder
+    private var rankedVibeChips: some View {
+        if let stats = displayedPlace.stats, stats.ratingCount > 0 {
+            VibeSnapshotPanel(
+                place: displayedPlace,
+                breakdowns: stats.visibleTopVibes,
+                showsAll: showsAllTopVibes
+            ) {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    showsAllTopVibes.toggle()
+                }
+            }
+        }
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(displayedPlace.name)
-                .font(.system(size: 23, weight: .black, design: .default))
-                .foregroundStyle(VibeDesign.primaryText)
-                .lineLimit(2)
-                .minimumScaleFactor(0.82)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .layoutPriority(2)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 7) {
+                shareStylePlaceBadge
+
+                Text(displayedPlace.name.uppercased())
+                    .font(.system(size: placeTitleFontSize, weight: .black, design: .default))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(VibeDesign.brandBlue)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(2)
+            }
 
             if !displayedPlace.locationLine.isEmpty {
-                AddressDirectionsLink(place: displayedPlace)
+                AddressDirectionsLink(place: displayedPlace, style: .shareCard)
             }
 
             if let category = displayedPlace.displayCategory {
@@ -108,22 +231,30 @@ struct RatingSheetView: View {
         }
     }
 
+    private var shareStylePlaceBadge: some View {
+        ZStack {
+            Circle()
+                .fill(VibeDesign.brandBlue)
+
+            Image(systemName: "mappin.circle.fill")
+                .font(.system(size: 17, weight: .black))
+                .foregroundStyle(VibeDesign.brandYellow)
+        }
+        .frame(width: 31, height: 31)
+        .overlay {
+            Circle()
+                .stroke(Color.white.opacity(0.70), lineWidth: 1)
+        }
+    }
+
     private var ratingControls: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 8) {
             if let revealedSubmission {
                 PostSubmissionRevealView(submission: revealedSubmission, initialPlace: draft.place)
             } else {
                 preSubmissionDiscovery
 
                 vibeGrid
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-
-                submitSection
             }
         }
         .padding(.horizontal, 18)
@@ -135,18 +266,35 @@ struct RatingSheetView: View {
     }
 
     private var presentationHeight: CGFloat {
-        guard let revealedSubmission else {
-            return displayedPlace.name.count > 20 ? 556 : 540
+        let fallbackHeight: CGFloat = revealedSubmission == nil ? 620 : 470
+        let contentHeight = measuredFormHeight > 0 ? measuredFormHeight : fallbackHeight
+        let maximumHeight = max(420, UIScreen.main.bounds.height - activeWindowTopSafeAreaInset - 8)
+
+        return min(
+            min(780, maximumHeight),
+            max(420, contentHeight + 8)
+        )
+    }
+
+    private var activeWindowTopSafeAreaInset: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .safeAreaInsets.top ?? 0
+    }
+
+    private var placeTitleFontSize: CGFloat {
+        switch displayedPlace.name.count {
+        case 0...20:
+            return 25
+        case 21...30:
+            return 22
+        case 31...42:
+            return 18
+        default:
+            return 16
         }
-
-        let selectedRows = max(1, revealedSubmission.rating.selectedVibeTags.count)
-        let communityRows = isFirstVibe(revealedSubmission)
-            ? 1
-            : max(1, min(3, revealedSubmission.place.stats?.visibleTopVibes.count ?? 0))
-        let comparisonRows = max(selectedRows, communityRows)
-        let titleExtra: CGFloat = displayedPlace.name.count > 24 ? 22 : 0
-
-        return min(520, max(380, 315 + CGFloat(comparisonRows) * 48 + titleExtra))
     }
 
     private func isFirstVibe(_ submission: RatingSubmission) -> Bool {
@@ -171,8 +319,8 @@ struct RatingSheetView: View {
     }
 
     private var vibeGrid: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text("Pick one to three vibes")
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L10n.string("Pick one to three vibes"))
                 .font(.headline.weight(.black))
 
             VStack(alignment: .leading, spacing: 6) {
@@ -208,67 +356,23 @@ struct RatingSheetView: View {
         orderedVibes.filter { $0.guidanceGroup == group }
     }
 
-    private var submitSection: some View {
-        VStack(spacing: 2) {
-            submitButton
-
-            Text("Select one to three vibes.")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(VibeDesign.secondaryText)
-                .frame(maxWidth: .infinity)
-        }
-        .padding(.bottom, 0)
-    }
-
-    private var submitButton: some View {
-        Button {
-            Task {
-                await submit()
-            }
-        } label: {
-            HStack {
-                if isSubmitting {
-                    ProgressView()
-                        .tint(.white)
-                }
-                Text(submitTitle)
-            }
-            .font(.headline.weight(.black))
-            .foregroundStyle(selectedTags.isEmpty ? VibeDesign.secondaryText : Color.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 56)
-            .background(submitButtonBackground, in: Capsule())
-            .overlay {
-                Capsule()
-                    .stroke(selectedTags.isEmpty ? VibeDesign.hairline : Color.white.opacity(0.16), lineWidth: 1)
-            }
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
-        .contentShape(Capsule())
-        .shadow(color: selectedTags.isEmpty ? .black.opacity(0.04) : VibeDesign.pressedShadow, radius: 12, y: 5)
-        .disabled(isSubmitting || selectedTags.isEmpty)
-    }
-
-    private var submitButtonBackground: Color {
-        selectedTags.isEmpty ? VibeDesign.controlBackground.opacity(0.86) : VibeDesign.primary
-    }
-
-    private var submitTitle: String {
-        if isSubmitting {
-            return "Submitting"
-        }
-
-        if isEditingExistingRating {
-            return "Update vibes"
-        }
-
-        return "Submit vibes"
-    }
-
     private var isEditingExistingRating: Bool {
         displayedPlace.myRating != nil && revealedSubmission == nil
+    }
+
+    private var isDeleteAction: Bool {
+        isEditingExistingRating && selectedTags.isEmpty
+    }
+
+    private var operationErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { errorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    errorMessage = nil
+                }
+            }
+        )
     }
 
     private func toggle(_ tag: VibeTag) {
@@ -283,19 +387,58 @@ struct RatingSheetView: View {
         selectedTags.append(tag)
     }
 
-    private func submit() async {
+    private func saveAndReveal() async {
+        guard !selectedTags.isEmpty else {
+            closeSheet()
+            return
+        }
+
         isSubmitting = true
         errorMessage = nil
 
         do {
             let submission = try await viewModel.submitRating(vibeTags: selectedTags)
-            selectedTags = submission.rating.selectedVibeTags
-            revealedSubmission = submission
+            withAnimation(.easeInOut(duration: 0.2)) {
+                revealedSubmission = submission
+            }
+            isSubmitting = false
+        } catch {
+            errorMessage = error.localizedDescription
+            isSubmitting = false
+        }
+    }
+
+    private func deleteRating() async {
+        isSubmitting = true
+        errorMessage = nil
+
+        do {
+            _ = try await viewModel.deleteRating()
+            viewModel.closeRatingFlow()
+            dismiss()
         } catch {
             errorMessage = error.localizedDescription
         }
 
         isSubmitting = false
+    }
+
+    private func configureForCurrentDraftIfNeeded(force: Bool = false) {
+        guard force || configuredDraftID != draft.id else {
+            return
+        }
+
+        if configuredDraftID != draft.id {
+            measuredFormHeight = 0
+        }
+        configuredDraftID = draft.id
+        selectedTags = []
+        revealedSubmission = nil
+        isSubmitting = false
+        errorMessage = nil
+        showsAllTopVibes = false
+        showsDeleteConfirmation = false
+        prefillExistingRatingIfNeeded()
     }
 
     private func prefillExistingRatingIfNeeded() {
@@ -312,22 +455,8 @@ private struct RatingSheetBackground: View {
     let place: VibePlace
 
     var body: some View {
-        ZStack {
-            VibeDesign.sheetBackground.opacity(0.90)
-
-            if let vibe = place.stats?.visibleTopVibes.first?.vibeTag {
-                LinearGradient(
-                    colors: [
-                        vibe.visualStyle.color.opacity(0.05),
-                        Color.clear,
-                        VibeDesign.sheetBackground.opacity(0.20)
-                    ],
-                    startPoint: .topTrailing,
-                    endPoint: .bottomLeading
-                )
-            }
-        }
-        .ignoresSafeArea()
+        VibeDesign.ratingSheetSurface
+            .ignoresSafeArea()
     }
 }
 
@@ -349,14 +478,24 @@ private struct PostSubmissionRevealView: View {
                         .stroke(VibeDesign.primary.opacity(0.16), lineWidth: 1)
                 }
 
+            HStack(spacing: 8) {
+                VibeSubmissionCountView(place: submission.place, compact: true)
+
+                if let signal = submission.place.primaryDiscoverySignal {
+                    DiscoverySignalPill(signal: signal, compact: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+
             HStack(alignment: .top, spacing: 10) {
                 VibeComparisonColumn(
-                    title: "You picked",
+                    title: L10n.string("You picked"),
                     tags: submission.rating.selectedVibeTags
                 )
 
                 CommunityComparisonColumn(
-                    title: wasFirstToVibe ? "Everyone else" : "Community",
+                    title: L10n.string(wasFirstToVibe ? "Everyone else" : "Community"),
                     breakdowns: wasFirstToVibe ? [] : Array(submission.place.stats?.visibleTopVibes.prefix(3) ?? [])
                 )
             }
@@ -364,7 +503,7 @@ private struct PostSubmissionRevealView: View {
             SharePlaceButton(
                 place: submission.place,
                 selectedTags: submission.rating.selectedVibeTags,
-                title: "Share this vibe",
+                title: L10n.string("Share this vibe"),
                 isProminent: true
             )
         }
@@ -372,17 +511,21 @@ private struct PostSubmissionRevealView: View {
 
     private var agreementMessage: String {
         if wasFirstToVibe {
-            return "First vibe logged"
+            return L10n.string("You helped shape the first read.")
+        }
+
+        if submission.place.vibeCount <= 3 {
+            return L10n.string("This place is starting to get a vibe.")
         }
 
         let userTags = Set(submission.rating.selectedVibeTags)
         let communityTags = Set(submission.place.stats?.visibleTopVibes.prefix(3).map(\.vibeTag) ?? [])
 
         if !userTags.isDisjoint(with: communityTags) {
-            return "You and the internet mostly agree"
+            return L10n.string("You're with the crowd.")
         }
 
-        return "You went against the crowd"
+        return L10n.string("You went against the crowd.")
     }
 
     private var wasFirstToVibe: Bool {
@@ -421,7 +564,7 @@ private struct CommunityComparisonColumn: View {
                 .foregroundStyle(VibeDesign.secondaryText)
 
             if breakdowns.isEmpty {
-                Text("No one else yet")
+                Text(L10n.string("No one else yet"))
                     .font(.subheadline.weight(.black))
                     .foregroundStyle(VibeDesign.primaryText)
                     .lineLimit(2)
@@ -450,12 +593,11 @@ private struct ComparisonVibeRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: tag.visualStyle.symbolName)
-                .font(.caption.weight(.black))
+            VibeIconImage(tag: tag, size: 12)
                 .foregroundStyle(tag.visualStyle.color)
                 .frame(width: 16)
 
-            Text(tag.rawValue)
+            Text(tag.displayName)
                 .font(.subheadline.weight(.black))
                 .lineLimit(2)
                 .minimumScaleFactor(0.82)
@@ -489,14 +631,13 @@ private struct VibeChoiceButtonLabel: View {
                     .fill(iconFill)
                     .frame(width: 25, height: 25)
 
-                Image(systemName: tag.visualStyle.symbolName)
-                    .font(.system(size: 11, weight: .black))
+                VibeIconImage(tag: tag, size: 11)
                     .foregroundStyle(isSelected ? Color.white : tag.visualStyle.color)
                     .symbolRenderingMode(.hierarchical)
             }
             .frame(width: 29, alignment: .center)
 
-            Text(tag.rawValue)
+            Text(tag.displayName)
                 .font(.system(size: 12.8, weight: .black))
                 .lineLimit(2)
                 .minimumScaleFactor(0.82)
@@ -510,7 +651,7 @@ private struct VibeChoiceButtonLabel: View {
             }
         }
         .foregroundStyle(VibeDesign.primaryText)
-        .frame(maxWidth: .infinity, minHeight: 43, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 39, alignment: .leading)
         .padding(.horizontal, 9)
         .background(buttonBackground, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
         .overlay {
@@ -522,11 +663,138 @@ private struct VibeChoiceButtonLabel: View {
     }
 
     private var buttonBackground: Color {
-        isSelected ? tag.visualStyle.color.opacity(0.12) : VibeDesign.controlBackground
+        isSelected ? tag.visualStyle.color.opacity(0.12) : VibeDesign.ratingControlBackground
     }
 
     private var iconFill: Color {
         isSelected ? tag.visualStyle.color.opacity(0.92) : tag.visualStyle.color.opacity(0.14)
+    }
+}
+
+private struct VibeSnapshotPanel: View {
+    let place: VibePlace
+    let breakdowns: [VibeBreakdown]
+    let showsAll: Bool
+    let onToggleExpanded: () -> Void
+
+    private let collapsedLimit = 2
+
+    private var displayedBreakdowns: [VibeBreakdown] {
+        showsAll ? breakdowns : Array(breakdowns.prefix(collapsedLimit))
+    }
+
+    private var hasAdditionalBreakdowns: Bool {
+        breakdowns.count > collapsedLimit
+    }
+
+    private var columns: [GridItem] {
+        [
+            GridItem(
+                .adaptive(minimum: 138, maximum: 220),
+                spacing: 6,
+                alignment: .top
+            )
+        ]
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(L10n.string("Top vibes here").uppercased())
+                    .font(.system(size: 10.5, weight: .black))
+                    .foregroundStyle(VibeDesign.brandBlue)
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                if hasAdditionalBreakdowns {
+                    Button(action: onToggleExpanded) {
+                        HStack(spacing: 3) {
+                            Text(L10n.string(showsAll ? "Less" : "More"))
+                            Image(systemName: showsAll ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 8, weight: .black))
+                        }
+                        .font(.system(size: 10, weight: .black))
+                        .foregroundStyle(VibeDesign.brandBlue)
+                    }
+                    .accessibilityLabel(
+                        L10n.string(showsAll ? "Show fewer top vibes" : "Show all top vibes")
+                    )
+                }
+
+                VibeSubmissionCountView(place: place, compact: true)
+            }
+
+            if displayedBreakdowns.count == 1, let breakdown = displayedBreakdowns.first {
+                VibeSnapshotCell(breakdown: breakdown)
+            } else if showsAll {
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 6) {
+                        ForEach(displayedBreakdowns) { breakdown in
+                            VibeSnapshotCell(breakdown: breakdown)
+                                .frame(width: 150)
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+            } else {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
+                    ForEach(displayedBreakdowns) { breakdown in
+                        VibeSnapshotCell(breakdown: breakdown)
+                    }
+                }
+            }
+        }
+        .padding(8)
+        .background(
+            VibeDesign.brandBlue.opacity(0.055),
+            in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .stroke(VibeDesign.brandBlue.opacity(0.28), lineWidth: 1)
+        }
+    }
+}
+
+private struct VibeSnapshotCell: View {
+    let breakdown: VibeBreakdown
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(breakdown.vibeTag.visualStyle.color.opacity(0.14))
+
+                VibeIconImage(tag: breakdown.vibeTag, size: 10)
+                    .foregroundStyle(breakdown.vibeTag.visualStyle.color)
+            }
+            .frame(width: 24, height: 24)
+
+            Text(breakdown.vibeTag.displayName)
+                .font(.system(size: 10.5, weight: .black))
+                .foregroundStyle(VibeDesign.primaryText)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("\(breakdown.percentage)%")
+                .font(.system(size: 10.5, weight: .black))
+                .foregroundStyle(breakdown.vibeTag.visualStyle.color)
+                .lineLimit(1)
+                .padding(.horizontal, 6)
+                .frame(height: 22)
+                .background(Color.white.opacity(0.88), in: Capsule())
+        }
+        .padding(.horizontal, 7)
+        .frame(maxWidth: .infinity, minHeight: 34)
+        .background(Color.white.opacity(0.60), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(breakdown.vibeTag.visualStyle.color.opacity(0.20), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(L10n.format("%@, %d percent", breakdown.vibeTag.displayName, breakdown.percentage))
     }
 }
 

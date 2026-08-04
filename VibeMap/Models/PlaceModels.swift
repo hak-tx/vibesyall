@@ -24,7 +24,19 @@ struct PlaceStats: Codable, Hashable {
             }
             return [VibeBreakdown(vibeTag: topVibeTag, count: ratingCount, percentage: 100)]
         }
-        return topVibes
+        return topVibes.enumerated()
+            .sorted { lhs, rhs in
+                if lhs.element.percentage != rhs.element.percentage {
+                    return lhs.element.percentage > rhs.element.percentage
+                }
+
+                if lhs.element.count != rhs.element.count {
+                    return lhs.element.count > rhs.element.count
+                }
+
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
     }
 
     func includes(_ vibe: VibeTag) -> Bool {
@@ -33,37 +45,58 @@ struct PlaceStats: Codable, Hashable {
 }
 
 enum DiscoverySignal: String, CaseIterable, Identifiable, Hashable {
-    case firstToVibe = "First to Vibe"
-    case needsMoreVibes = "Needs More Vibes"
-    case hotTake = "Hot Take"
+    case firstToVibe = "Be first"
+    case needsMoreVibes = "Early Read"
+    case hotTake = "Split Decision"
     case hiddenGem = "Hidden Gem"
+    case trending = "Trending"
+    case localFavorite = "Local Favorite"
+    case recent = "Recent"
 
     var id: String { rawValue }
 
+    var displayName: String {
+        L10n.string(rawValue)
+    }
+
     var shortLabel: String {
-        switch self {
+        let englishLabel = switch self {
         case .firstToVibe:
             "Be first"
         case .needsMoreVibes:
-            "Needs vibes"
+            "Early read"
         case .hotTake:
-            "Hot take"
+            "Split"
         case .hiddenGem:
             "Hidden gem"
+        case .trending:
+            "Trending"
+        case .localFavorite:
+            "Favorite"
+        case .recent:
+            "Recent"
         }
+        return L10n.string(englishLabel)
     }
 
     var message: String {
-        switch self {
+        let englishMessage = switch self {
         case .firstToVibe:
             "No one has vibed this place yet."
         case .needsMoreVibes:
-            "This place needs more vibes."
+            "This place is just getting started."
         case .hotTake:
-            "Hot take: people are split."
+            "The top vibes are close."
         case .hiddenGem:
             "Hidden gem."
+        case .trending:
+            "People are vibing this recently."
+        case .localFavorite:
+            "A strong local favorite."
+        case .recent:
+            "Recently submitted."
         }
+        return L10n.string(englishMessage)
     }
 }
 
@@ -97,6 +130,24 @@ struct VibePlace: Identifiable, Codable, Hashable {
         stats?.ratingCount ?? 0
     }
 
+    var recentVibeCount: Int {
+        stats?.recentVibeCount ?? 0
+    }
+
+    var trendingScore: Double {
+        guard vibeCount > 0 else {
+            return 0
+        }
+
+        let uniqueVibeCount = stats?.visibleTopVibes.filter { $0.count > 0 }.count ?? 0
+        let distancePenalty = min((distanceMeters ?? 0) / 8_000, 8)
+        return Double(recentVibeCount * 3 + vibeCount + uniqueVibeCount * 2) - distancePenalty
+    }
+
+    var isTrending: Bool {
+        vibeCount >= 3 && recentVibeCount >= 2
+    }
+
     var isHotTake: Bool {
         guard vibeCount >= 10,
               let topVibes = stats?.visibleTopVibes,
@@ -104,21 +155,39 @@ struct VibePlace: Identifiable, Codable, Hashable {
             return false
         }
 
-        return abs(topVibes[0].percentage - topVibes[1].percentage) <= 10
+        return abs(topVibes[0].percentage - topVibes[1].percentage) <= 15
     }
 
     var isHiddenGem: Bool {
-        guard let stats,
-              (stats.recentVibeCount ?? 0) >= 5,
-              (stats.recentPositivePercentage ?? 0) >= 70 else {
+        guard vibeCount >= 5 else {
             return false
         }
 
-        return true
+        if let topVibe = stats?.visibleTopVibes.first,
+           [.hiddenGem, .underrated].contains(topVibe.vibeTag),
+           topVibe.percentage >= 35 {
+            return true
+        }
+
+        return recentVibeCount >= 3 && (stats?.recentPositivePercentage ?? 0) >= 70
+    }
+
+    var isLocalFavorite: Bool {
+        guard vibeCount >= 20,
+              let topVibe = stats?.visibleTopVibes.first,
+              topVibe.percentage >= 40 else {
+            return false
+        }
+
+        return Self.positiveVibeTags.contains(topVibe.vibeTag)
     }
 
     var needsMoreVibes: Bool {
-        (1...2).contains(vibeCount)
+        (1...5).contains(vibeCount)
+    }
+
+    var hasRecentVibes: Bool {
+        (1...5).contains(vibeCount) && recentVibeCount > 0
     }
 
     var primaryDiscoverySignal: DiscoverySignal? {
@@ -126,12 +195,24 @@ struct VibePlace: Identifiable, Codable, Hashable {
             return .firstToVibe
         }
 
+        if isTrending {
+            return .trending
+        }
+
         if isHotTake {
             return .hotTake
         }
 
+        if isLocalFavorite {
+            return .localFavorite
+        }
+
         if isHiddenGem {
             return .hiddenGem
+        }
+
+        if hasRecentVibes {
+            return .recent
         }
 
         if needsMoreVibes {
@@ -144,6 +225,15 @@ struct VibePlace: Identifiable, Codable, Hashable {
     var needsOpinion: Bool {
         vibeCount == 0 || needsMoreVibes || isHotTake
     }
+
+    private static let positiveVibeTags: Set<VibeTag> = [
+        .changedMyLife,
+        .fire,
+        .worthTheDrive,
+        .iconic,
+        .hiddenGem,
+        .underrated
+    ]
 
     func matchesAnyVibe(in filters: Set<VibeTag>) -> Bool {
         guard !filters.isEmpty else {
@@ -426,7 +516,7 @@ struct VibeRating: Identifiable, Codable, Hashable {
     }
 
     var vibeSummary: String {
-        selectedVibeTags.map(\.rawValue).joined(separator: " + ")
+        selectedVibeTags.map(\.displayName).joined(separator: " + ")
     }
 }
 

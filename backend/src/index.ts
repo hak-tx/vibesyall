@@ -12,7 +12,7 @@ const MIN_MAP_CELL_SIZE_METERS = 10_000;
 const MAX_MAP_CELL_SIZE_METERS = 300_000;
 const MAX_PROVIDER_SEARCH_RESULTS = 8;
 const GOOGLE_PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText";
-const CACHE_VERSION = "2026-07-05-primary-display-vibes-1";
+const CACHE_VERSION = "2026-07-25-taxonomy-v3-low-key";
 const LIVE_APP_STORE_URL = "https://apps.apple.com/us/app/vibes-yall/id6783989332?mt=8";
 const CACHE_TTL_SECONDS = {
   marketing: 60,
@@ -43,16 +43,18 @@ const VIBE_TAG_DEFINITIONS = [
   { id: "iconic", slug: "iconic", display_name: "Iconic", emoji: "🌟", sentiment_group: "identity", sort_order: 40 },
   { id: "hidden_gem", slug: "hidden_gem", display_name: "Hidden Gem", emoji: "💎", sentiment_group: "positive", sort_order: 50 },
   { id: "underrated", slug: "underrated", display_name: "Underrated", emoji: "📈", sentiment_group: "positive", sort_order: 60 },
-  { id: "mid", slug: "mid", display_name: "Mid", emoji: "😐", sentiment_group: "neutral", sort_order: 70 },
-  { id: "chaos", slug: "chaos", display_name: "Chaos", emoji: "🌪", sentiment_group: "neutral", sort_order: 80 },
-  { id: "overrated", slug: "overrated", display_name: "Overrated", emoji: "👎", sentiment_group: "negative", sort_order: 90 },
+  { id: "bougie", slug: "bougie", display_name: "Bougie", emoji: "👑", sentiment_group: "identity", sort_order: 70 },
+  { id: "low_key", slug: "low_key", display_name: "Low-key", emoji: "🌿", sentiment_group: "identity", sort_order: 80 },
+  { id: "mid", slug: "mid", display_name: "Mid", emoji: "😐", sentiment_group: "neutral", sort_order: 90 },
+  { id: "chaos", slug: "chaos", display_name: "Chaos", emoji: "🌪", sentiment_group: "neutral", sort_order: 100 },
+  { id: "overrated", slug: "overrated", display_name: "Overrated", emoji: "👎", sentiment_group: "negative", sort_order: 110 },
   {
     id: "tourist_trap",
     slug: "tourist_trap",
     display_name: "Tourist Trap",
     emoji: "📸",
     sentiment_group: "negative",
-    sort_order: 100,
+    sort_order: 120,
   },
   {
     id: "needs_prayer",
@@ -60,7 +62,7 @@ const VIBE_TAG_DEFINITIONS = [
     display_name: "Needs Prayer",
     emoji: "🙏",
     sentiment_group: "negative",
-    sort_order: 110,
+    sort_order: 130,
   },
   {
     id: "emotionally_damaging",
@@ -68,11 +70,11 @@ const VIBE_TAG_DEFINITIONS = [
     display_name: "Emotionally Damaging",
     emoji: "💀",
     sentiment_group: "negative",
-    sort_order: 120,
+    sort_order: 140,
   },
 ] as const;
 
-const CLIENT_VIBES = [
+const CLIENT_VIBES_V1 = [
   "Changed my Life",
   "Fire",
   "Worth the Drive",
@@ -87,10 +89,27 @@ const CLIENT_VIBES = [
   "Emotionally Damaging",
 ] as const;
 
+const CLIENT_VIBES_CURRENT = [
+  "Changed my Life",
+  "Fire",
+  "Worth the Drive",
+  "Iconic",
+  "Hidden Gem",
+  "Underrated",
+  "Bougie",
+  "Low-key",
+  "Mid",
+  "Chaos",
+  "Overrated",
+  "Tourist Trap",
+  "Needs Prayer",
+  "Emotionally Damaging",
+] as const;
+
 const REPORT_REASONS = ["wrong_place", "duplicate_place", "spam_or_brigading", "inappropriate", "other"] as const;
 const REPORT_STATUSES = ["open", "reviewed", "dismissed", "action_taken"] as const;
 const ACTIVE_EVENT_WHERE = "moderation_status = 'active' AND is_deleted = 0";
-const CURRENT_TAXONOMY_VERSION_ID = "vibes_v1";
+const CURRENT_TAXONOMY_VERSION_ID = "vibes_v3";
 const PLACE_SNAPSHOT_VERSION = "place_snapshot_v1";
 const ACCOUNT_SIGNUP_THRESHOLD_DEFAULT = 10;
 const EMAIL_CONFIRMATION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -99,6 +118,7 @@ const VIBES_MARKETING_HOST = "vibesyall.com";
 const SUPPORT_EMAIL = "vibesyall@gmail.com";
 const ACCOUNT_CONFIRMATION_FROM_EMAIL = "hello@vibesyall.com";
 const BETA_ACCESS_HEADER = "X-Vibe-Beta-Token";
+const TAXONOMY_VERSION_HEADER = "X-Vibe-Taxonomy-Version";
 const ADMIN_HOST = "admin.vibesyall.com";
 const ADMIN_ACCESS_JWT_HEADER = "cf-access-jwt-assertion";
 const ADMIN_ACCESS_EMAIL_HEADER = "cf-access-authenticated-user-email";
@@ -108,6 +128,7 @@ const ANALYTICS_EVENT_NAMES = [
   "place_selected",
   "rating_started",
   "vibe_submitted",
+  "vibe_deleted",
   "account_signup_requested",
   "account_login_requested",
   "account_logout",
@@ -371,7 +392,10 @@ type AnalyticsEventInput = DeviceIdentityInput & {
 
 type AdminAnalyticsOptions = {
   includeInternal: boolean;
+  days?: AdminAnalyticsWindowDays;
 };
+
+type AdminAnalyticsWindowDays = 1 | 7 | 30;
 
 type AdminDeviceLabelInput = {
   identity_type?: unknown;
@@ -452,6 +476,15 @@ type AnalyticsDailyRow = {
   account_event_count: number | null;
 };
 
+type AnalyticsHourlyRow = Omit<AnalyticsDailyRow, "day" | "new_devices"> & {
+  bucket_index: number | null;
+};
+
+type AnalyticsHourlyNewDevicesRow = {
+  bucket_index: number | null;
+  new_devices: number | null;
+};
+
 type AnalyticsSummaryRow = {
   active_today: number | null;
   active_7d: number | null;
@@ -473,10 +506,36 @@ type AnalyticsContentTotalsRow = {
   total_vibed_places: number | null;
   total_anonymous_vibers: number | null;
   vibes_30d: number | null;
+  vibes_previous_30d: number | null;
   anonymous_vibers_30d: number | null;
+  anonymous_vibers_previous_30d: number | null;
   vibed_places_30d: number | null;
+  vibed_places_previous_30d: number | null;
   first_vibe_at: string | null;
   last_vibe_at: string | null;
+};
+
+type AnalyticsPreviousPeriodRow = {
+  active_devices: number | null;
+  new_devices: number | null;
+  app_opens: number | null;
+  searches: number | null;
+  place_selects: number | null;
+};
+
+type AnalyticsUsageDepthRow = {
+  active_devices: number | null;
+  one_day_devices: number | null;
+  repeat_devices: number | null;
+  loyal_devices: number | null;
+  active_device_days: number | null;
+};
+
+type ViberDepthRow = {
+  contributors: number | null;
+  one_place_contributors: number | null;
+  two_to_three_place_contributors: number | null;
+  four_plus_place_contributors: number | null;
 };
 
 type VibeHistoryDailyRow = {
@@ -484,6 +543,10 @@ type VibeHistoryDailyRow = {
   vibe_submissions: number | null;
   unique_vibers: number | null;
   vibed_places: number | null;
+};
+
+type VibeHistoryHourlyRow = Omit<VibeHistoryDailyRow, "day"> & {
+  bucket_index: number | null;
 };
 
 type AnalyticsRetentionRow = {
@@ -590,9 +653,18 @@ export default {
       return json({ error: "Beta access required." }, { status: 403 });
     }
 
-    const rateLimit = rateLimitDecision(request);
+    const rateLimit = await rateLimitDecision(request, path, env);
     if (!rateLimit.allowed) {
-      return json({ error: "Too many vibes too quickly." }, { status: 429 });
+      return json(
+        { error: "Too many requests. Please try again shortly." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": "60",
+            "X-RateLimit-Policy": rateLimit.policy,
+          },
+        }
+      );
     }
 
     try {
@@ -642,12 +714,17 @@ export default {
 
       if (request.method === "GET" && path === "/vibes") {
         return cachedGET(request, ctx, CACHE_TTL_SECONDS.vibeTaxonomy, () =>
-          json({ vibes: CLIENT_VIBES }, { headers: publicCacheHeaders(CACHE_TTL_SECONDS.vibeTaxonomy) })
+          json(
+            { vibes: requestSupportsCurrentTaxonomy(request) ? CLIENT_VIBES_CURRENT : CLIENT_VIBES_V1 },
+            { headers: publicCacheHeaders(CACHE_TTL_SECONDS.vibeTaxonomy) }
+          )
         );
       }
 
       if (request.method === "GET" && path === "/vibes/tags") {
-        return cachedGET(request, ctx, CACHE_TTL_SECONDS.vibeTaxonomy, () => getVibeTags(env));
+        return cachedGET(request, ctx, CACHE_TTL_SECONDS.vibeTaxonomy, () =>
+          getVibeTags(env, requestSupportsCurrentTaxonomy(request))
+        );
       }
 
       if (request.method === "GET" && path === "/account/eligibility") {
@@ -689,8 +766,12 @@ export default {
         return getNearbyPlaces(request, url, env);
       }
 
+      if (request.method === "GET" && path === "/places/search") {
+        return searchSavedPlaces(request, url, env);
+      }
+
       if (request.method === "GET" && path === "/places/map-cells") {
-        return cachedGET(request, ctx, CACHE_TTL_SECONDS.mapCells, () => getPlaceMapCells(url, env));
+        return cachedGET(request, ctx, CACHE_TTL_SECONDS.mapCells, () => getPlaceMapCells(request, url, env));
       }
 
       if (request.method === "GET" && path === "/places/provider-search") {
@@ -703,6 +784,11 @@ export default {
 
       if (request.method === "POST" && (path === "/vibes" || path === "/ratings")) {
         return upsertVibe(request, env, ctx);
+      }
+
+      const ratingDeleteMatch = path.match(/^\/(?:vibes|ratings)\/([^/]+)$/);
+      if (request.method === "DELETE" && ratingDeleteMatch) {
+        return deleteVibe(request, env, ctx, decodeURIComponent(ratingDeleteMatch[1]));
       }
 
       if (request.method === "POST" && path === "/reports") {
@@ -727,6 +813,9 @@ export default {
       console.error(JSON.stringify({ message: "Unhandled Worker error", error: String(error) }));
       return json({ error: "Something went sideways." }, { status: 500 });
     }
+  },
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(drainAggregateRefreshJobs(env));
   },
 } satisfies ExportedHandler<Env>;
 
@@ -846,7 +935,7 @@ function adminMessagePage(message: string, status: number): Response {
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex,nofollow">
   <title>VIBES Y'ALL Admin</title>
   <style>${adminCSS()}</style>
@@ -860,12 +949,12 @@ function adminMessagePage(message: string, status: number): Response {
 </html>`, { status, headers: adminHTMLHeaders() });
 }
 
-function adminDashboardPage(email: string): Response {
+export function adminDashboardPage(email: string): Response {
   return html(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex,nofollow">
   <title>VIBES Y'ALL Analytics</title>
   <style>${adminCSS()}</style>
@@ -875,7 +964,7 @@ function adminDashboardPage(email: string): Response {
     <header class="admin-header">
       <div>
         <p class="eyebrow">VIBES Y'ALL Admin</p>
-        <h1>Analytics</h1>
+        <h1>App Activity</h1>
       </div>
       <p class="session">Signed in with Cloudflare Access as <strong>${escapeHTML(email)}</strong></p>
     </header>
@@ -889,87 +978,174 @@ function adminDashboardPage(email: string): Response {
           <small>Default public-growth view. Turn off to compare against all tracked traffic.</small>
         </span>
       </label>
-      <span id="filter-mode" class="pill">Public trend view</span>
+      <div class="control-actions">
+        <fieldset class="window-picker">
+          <legend>Trend window</legend>
+          <div role="group" aria-label="Trend window">
+            <button type="button" data-days="1" aria-pressed="false">Last 24 hrs</button>
+            <button type="button" data-days="7" aria-pressed="false">7 days</button>
+            <button type="button" data-days="30" aria-pressed="true">30 days</button>
+          </div>
+        </fieldset>
+        <span id="filter-mode" class="pill">Public trend view</span>
+      </div>
     </section>
     <section id="summary" class="metric-grid"></section>
-    <section class="panel">
+    <section class="panel insight-panel">
       <div class="panel-heading">
-        <h2>Usage Trend</h2>
-        <span>Tracked events, last 30 days</span>
+        <div>
+          <p class="section-kicker">Plain-language readout</p>
+          <h2>What stands out</h2>
+        </div>
+        <span>Signals worth watching now</span>
       </div>
-      <div id="trend" class="trend"></div>
+      <div id="insights" class="insight-grid"></div>
     </section>
     <section class="panel">
       <div class="panel-heading">
-        <h2>Vibe History</h2>
-        <span>Saved submissions, last 30 days</span>
+        <div>
+          <p class="section-kicker">Audience</p>
+          <h2>New and returning devices</h2>
+        </div>
+        <span id="audience-window-copy">Daily anonymous devices, last 30 days</span>
       </div>
-      <div id="history" class="trend"></div>
+      <div id="audience-trend" class="trend"></div>
+    </section>
+    <section class="panel">
+      <div class="panel-heading">
+        <div>
+          <p class="section-kicker">Contribution</p>
+          <h2>Places getting vibed</h2>
+        </div>
+        <span id="vibe-window-copy">New place ratings and contributors, last 30 days</span>
+      </div>
+      <div id="vibe-trend" class="trend"></div>
+    </section>
+    <section class="two-column business-charts">
+      <div class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="section-kicker">Depth</p>
+            <h2>One-and-done or engaged?</h2>
+          </div>
+          <span>Places vibed per contributor</span>
+        </div>
+        <div id="contribution-depth" class="distribution"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="section-kicker">Discovery</p>
+            <h2>Searches and place taps</h2>
+          </div>
+          <span id="discovery-window-copy">Daily actions, last 30 days</span>
+        </div>
+        <div id="discovery-trend" class="trend compact-chart"></div>
+      </div>
     </section>
     <section class="two-column">
       <div class="panel">
         <div class="panel-heading">
-          <h2>Event Mix</h2>
-          <span>Last 30 days</span>
-        </div>
-        <div id="events" class="list"></div>
-      </div>
-      <div class="panel">
-        <div class="panel-heading">
-          <h2>App Versions</h2>
-          <span>Active devices</span>
+          <div>
+            <p class="section-kicker">Release health</p>
+            <h2>App versions in use</h2>
+          </div>
+          <span id="versions-window-copy">Active devices, last 30 days</span>
         </div>
         <div id="versions" class="list"></div>
       </div>
-    </section>
-    <section class="panel">
-      <div class="panel-heading">
-        <h2>Device Labels</h2>
-        <span>Admin-only filters</span>
-      </div>
-      <form id="device-label-form" class="device-label-form">
-        <select id="label-identity-type" aria-label="Identity type">
-          <option value="analytics_device">Analytics device</option>
-          <option value="anonymous_user">Vibe-history device</option>
-        </select>
-        <input id="label-identity-id" type="text" placeholder="Device id" autocomplete="off" required>
-        <input id="label-name" type="text" placeholder="Label, e.g. Brian or Rich" autocomplete="off" required>
-        <select id="label-category" aria-label="Category">
-          <option value="internal">Internal</option>
-          <option value="reviewer">Reviewer</option>
-          <option value="external">External</option>
-          <option value="unknown">Unknown</option>
-        </select>
-        <label class="compact-toggle">
-          <input id="label-excluded" type="checkbox" checked>
-          Exclude
-        </label>
-        <button type="submit">Save Label</button>
-      </form>
-      <div id="label-status" class="form-status"></div>
-    </section>
-    <section class="two-column">
       <div class="panel">
         <div class="panel-heading">
-          <h2>Current Labels</h2>
-          <span>Filtered when excluded</span>
+          <div>
+            <p class="section-kicker">Diagnostics</p>
+            <h2>Tracked actions</h2>
+          </div>
+          <span id="events-window-copy">Last 30 days</span>
         </div>
-        <div id="device-labels" class="device-list"></div>
-      </div>
-      <div class="panel">
-        <div class="panel-heading">
-          <h2>Recent Unlabeled</h2>
-          <span>Tap Tag to fill the form</span>
-        </div>
-        <div id="recent-devices" class="device-list"></div>
+        <div id="events" class="list"></div>
       </div>
     </section>
+    <details class="admin-tools">
+      <summary>Internal tester and device tools</summary>
+      <div class="admin-tools-body">
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>Device Labels</h2>
+            <span>Admin-only filters</span>
+          </div>
+          <form id="device-label-form" class="device-label-form">
+            <select id="label-identity-type" aria-label="Identity type">
+              <option value="analytics_device">Analytics device</option>
+              <option value="anonymous_user">Vibe-history device</option>
+            </select>
+            <input id="label-identity-id" type="text" placeholder="Device id" autocomplete="off" required>
+            <input id="label-name" type="text" placeholder="Label, e.g. Brian or Rich" autocomplete="off" required>
+            <select id="label-category" aria-label="Category">
+              <option value="internal">Internal</option>
+              <option value="reviewer">Reviewer</option>
+              <option value="external">External</option>
+              <option value="unknown">Unknown</option>
+            </select>
+            <label class="compact-toggle">
+              <input id="label-excluded" type="checkbox" checked>
+              Exclude
+            </label>
+            <button type="submit">Save Label</button>
+          </form>
+          <div id="label-status" class="form-status"></div>
+        </section>
+        <section class="two-column">
+          <div class="panel">
+            <div class="panel-heading">
+              <h2>Current Labels</h2>
+              <span>Filtered when excluded</span>
+            </div>
+            <div id="device-labels" class="device-list"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-heading">
+              <h2>Recent Unlabeled</h2>
+              <span>Tap Tag to fill the form</span>
+            </div>
+            <div id="recent-devices" class="device-list"></div>
+          </div>
+        </section>
+      </div>
+    </details>
   </main>
   <script>
     const analyticsBasePath = location.hostname === "${ADMIN_HOST}" ? "/analytics.json" : "/admin/analytics.json";
     const labelPath = location.hostname === "${ADMIN_HOST}" ? "/device-labels" : "/admin/device-labels";
     const numberFormat = new Intl.NumberFormat();
+    const centralDateFormat = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago",
+      month: "short",
+      day: "numeric",
+      year: "numeric"
+    });
+    const centralDateTimeFormat = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZoneName: "short"
+    });
+    const centralHourFormat = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago",
+      hour: "numeric"
+    });
+    const centralHourTooltipFormat = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+    const requestedDays = Number(new URLSearchParams(location.search).get("days"));
     let currentPayload = null;
+    let selectedDays = [1, 7, 30].includes(requestedDays) ? requestedDays : 30;
 
     function number(value) {
       return numberFormat.format(Number(value || 0));
@@ -981,7 +1157,12 @@ function adminDashboardPage(email: string): Response {
 
     function shortDate(value) {
       if (!value) return "n/a";
-      return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      return centralDateFormat.format(new Date(value));
+    }
+
+    function centralDateTime(value) {
+      if (!value) return "n/a";
+      return centralDateTimeFormat.format(new Date(value));
     }
 
     function escapeText(value) {
@@ -1001,6 +1182,7 @@ function adminDashboardPage(email: string): Response {
 
     function analyticsPath() {
       const params = new URLSearchParams();
+      params.set("days", String(selectedDays));
       if (!document.getElementById("exclude-internal").checked) {
         params.set("include_internal", "1");
       }
@@ -1008,8 +1190,48 @@ function adminDashboardPage(email: string): Response {
       return analyticsBasePath + (query ? "?" + query : "");
     }
 
-    function metric(label, value, detail) {
-      return '<article class="metric"><span>' + label + '</span><strong>' + value + '</strong><small>' + detail + '</small></article>';
+    function percentRatio(numerator, denominator) {
+      const top = Number(numerator || 0);
+      const bottom = Number(denominator || 0);
+      return bottom > 0 ? percent((top / bottom) * 100) : "n/a";
+    }
+
+    function cohortText(retained, cohort) {
+      const retainedValue = Number(retained || 0);
+      const cohortValue = Number(cohort || 0);
+      return number(retainedValue) + " / " + number(cohortValue);
+    }
+
+    function changePercent(current, previous) {
+      const currentValue = Number(current || 0);
+      const previousValue = Number(previous || 0);
+      if (previousValue <= 0) return null;
+      return ((currentValue - previousValue) / previousValue) * 100;
+    }
+
+    function windowPhrase(days, capitalized) {
+      const phrase = days === 1 ? "last 24 hours" : "last " + days + " days";
+      return capitalized ? phrase.charAt(0).toUpperCase() + phrase.slice(1) : phrase;
+    }
+
+    function comparisonPhrase(days) {
+      return days === 1 ? "previous 24 hours" : "prior " + days + " days";
+    }
+
+    function changeLabel(current, previous, days) {
+      const change = changePercent(current, previous);
+      if (change === null) return "No prior baseline";
+      if (Math.abs(change) < 0.05) return "No change vs " + comparisonPhrase(days);
+      return (change > 0 ? "Up " : "Down ") + Math.abs(change).toFixed(0) + "% vs " + comparisonPhrase(days);
+    }
+
+    function metricCard(title, value, detail, comparison, tone) {
+      return '<article class="metric-card ' + escapeText(tone || "") + '">'
+        + '<span>' + escapeText(title) + '</span>'
+        + '<strong>' + escapeText(value) + '</strong>'
+        + '<small>' + escapeText(detail) + '</small>'
+        + '<em>' + escapeText(comparison) + '</em>'
+        + '</article>';
     }
 
     function listRow(label, value, max) {
@@ -1017,27 +1239,157 @@ function adminDashboardPage(email: string): Response {
       return '<div class="list-row"><div><strong>' + label + '</strong><span>' + number(value) + '</span></div><i style="width:' + width + '%"></i></div>';
     }
 
-    function columnChart(rows, valueKey, detailKey, valueLabel, detailLabel) {
-      const values = rows.map((row) => Number(row[valueKey] || 0));
-      const max = Math.max(...values, 1);
-      const maxIndex = values.indexOf(max);
-      const lastValueIndex = values.reduce((lastIndex, value, index) => value > 0 ? index : lastIndex, -1);
-      return '<div class="chart-viewport"><div class="column-chart" style="--chart-columns:' + rows.length + ';">'
-        + rows.map((row, index) => {
-          const value = Number(row[valueKey] || 0);
-          const detail = Number(row[detailKey] || 0);
-          const label = row.day.slice(5);
-          const height = value > 0 ? Math.max(4, Math.round((value / max) * 100)) : 0;
-          const showTick = index === 0 || index === rows.length - 1 || index % 5 === 0;
-          const showValue = value > 0 && (index === maxIndex || index === lastValueIndex || rows.length <= 14);
-          const title = label + ': ' + number(value) + ' ' + valueLabel + ', ' + number(detail) + ' ' + detailLabel;
-          return '<div class="column-bar' + (showTick ? ' has-tick' : '') + (showValue ? ' has-value' : '') + '" title="' + escapeText(title) + '" aria-label="' + escapeText(title) + '">'
-            + '<span>' + (showValue ? number(value) : '') + '</span>'
-            + '<i style="height:' + height + '%"></i>'
-            + '<em>' + (showTick ? escapeText(label) : '') + '</em>'
+    function chartScale(value) {
+      const maximum = Math.max(1, Number(value || 0));
+      const roughStep = maximum / 4;
+      const magnitude = Math.pow(10, Math.floor(Math.log10(roughStep || 1)));
+      const normalized = roughStep / magnitude;
+      const step = Math.max(
+        1,
+        (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10) * magnitude
+      );
+      const scaleMaximum = Math.max(step, Math.ceil(maximum / step) * step);
+      const ticks = [];
+      for (let tick = scaleMaximum; tick >= 0; tick -= step) {
+        ticks.push(tick);
+      }
+      return { maximum: scaleMaximum, ticks };
+    }
+
+    function groupedColumnChart(rows, series, yAxisLabel, options) {
+      const chartOptions = options || {};
+      const values = rows.flatMap((row) => series.map((item) => Number(row[item.key] || 0)));
+      const scale = chartScale(Math.max(...values, 1));
+      const legend = '<div class="chart-legend">' + series.map((item) => (
+        '<span><i class="' + escapeText(item.className) + '"></i>' + escapeText(item.label) + '</span>'
+      )).join("") + '</div>';
+      const yAxis = '<div class="y-axis" aria-hidden="true">'
+        + '<strong>' + escapeText(yAxisLabel || "Count") + '</strong>'
+        + '<div>' + scale.ticks.map((tick) => '<span>' + number(tick) + '</span>').join("") + '</div>'
+        + '</div>';
+      const grid = '<div class="chart-grid" aria-hidden="true">'
+        + scale.ticks.map(() => '<i></i>').join("")
+        + '</div>';
+      const columns = '<div class="grouped-chart" style="--chart-columns:' + rows.length + ';">'
+        + rows.map((row, rowIndex) => {
+          const isHourly = Boolean(chartOptions.hourly && row.bucketStart);
+          const label = isHourly ? centralHourFormat.format(new Date(row.bucketStart)) : row.day.slice(5);
+          const labelStep = rows.length <= 7 ? 1 : Math.ceil(rows.length / 10);
+          const showLabel = rowIndex === 0 || rowIndex === rows.length - 1 || rowIndex % labelStep === 0;
+          const period = isHourly
+            ? centralHourTooltipFormat.format(new Date(row.bucketStart)) + "–" + centralHourTooltipFormat.format(new Date(row.bucketEnd))
+            : label;
+          const title = period + ': ' + series.map((item) => number(row[item.key]) + ' ' + item.label.toLowerCase()).join(", ");
+          return '<div class="grouped-day" tabindex="0" data-tooltip="' + escapeText(title) + '" aria-label="' + escapeText(title) + '">'
+            + '<div class="bar-pair">' + series.map((item) => {
+              const value = Number(row[item.key] || 0);
+              const height = value > 0 ? Math.max(3, (value / scale.maximum) * 100) : 0;
+              return '<span class="bar-column" style="--bar-height:' + height + '%">'
+                + (value > 0 ? '<b>' + number(value) + '</b>' : '')
+                + '<i class="' + escapeText(item.className) + '" style="height:' + height + '%"></i>'
+                + '</span>';
+            }).join("") + '</div>'
+            + '<em' + (showLabel ? '' : ' aria-hidden="true" class="axis-label-hidden"') + '>'
+            + (showLabel ? escapeText(label) : '') + '</em>'
             + '</div>';
         }).join("")
+        + '</div>';
+      return legend
+        + '<div class="chart-shell">'
+        + yAxis
+        + '<div class="chart-viewport"><div class="chart-plot" style="--chart-columns:' + rows.length + ';">'
+        + grid + columns
+        + '</div><div class="x-axis-title">' + escapeText(chartOptions.xAxisLabel || "Date") + '</div></div>'
+        + '</div>';
+    }
+
+    function trendLineChart(rows, series, yAxisLabel, options) {
+      const chartOptions = options || {};
+      const isHourly = Boolean(chartOptions.hourly);
+      const values = rows.flatMap((row) => series.map((item) => Number(row[item.key] || 0)));
+      const scale = chartScale(Math.max(...values, 1));
+      const legend = '<div class="chart-legend">' + series.map((item) => (
+        '<span><i class="' + escapeText(item.className) + '"></i>' + escapeText(item.label) + '</span>'
+      )).join("") + '</div>';
+      const yAxis = '<div class="y-axis line-y-axis" aria-hidden="true">'
+        + '<strong>' + escapeText(yAxisLabel || "Count") + '</strong>'
+        + '<div>' + scale.ticks.map((tick) => '<span>' + number(tick) + '</span>').join("") + '</div>'
+        + '</div>';
+      const grid = '<div class="chart-grid line-chart-grid" aria-hidden="true">'
+        + scale.ticks.map(() => '<i></i>').join("")
+        + '</div>';
+      const denominator = Math.max(1, rows.length - 1);
+      const paths = series.map((item) => {
+        const points = rows.map((row, index) => {
+          const x = (index / denominator) * 1000;
+          const y = 100 - (Number(row[item.key] || 0) / scale.maximum) * 100;
+          return x.toFixed(2) + "," + y.toFixed(2);
+        }).join(" ");
+        return '<polyline class="line-series ' + escapeText(item.className) + '" points="' + points + '"></polyline>';
+      }).join("");
+      const points = rows.map((row, rowIndex) => {
+        const period = isHourly
+          ? centralHourTooltipFormat.format(new Date(row.bucketStart))
+            + "–" + centralHourTooltipFormat.format(new Date(row.bucketEnd))
+          : row.day;
+        return series.map((item, seriesIndex) => {
+          const value = Number(row[item.key] || 0);
+          if (value <= 0) return "";
+          const x = (rowIndex / denominator) * 100;
+          const y = (value / scale.maximum) * 100;
+          const title = period + ": " + number(value) + " " + item.label.toLowerCase();
+          const offset = (seriesIndex - (series.length - 1) / 2) * 5;
+          const edgeClass = rowIndex === 0 ? " edge-start" : rowIndex === rows.length - 1 ? " edge-end" : "";
+          return '<button type="button" class="line-point ' + escapeText(item.className) + edgeClass + '"'
+            + ' style="left:calc(' + x.toFixed(3) + '% + ' + offset.toFixed(1) + 'px);bottom:' + y.toFixed(3) + '%;"'
+            + ' aria-label="' + escapeText(title) + '">'
+            + '<span>' + escapeText(title) + '</span>'
+            + '</button>';
+        }).join("");
+      }).join("");
+      const tickCount = 7;
+      const tickIndexes = Array.from({ length: Math.min(tickCount, rows.length) }, (_, index) => (
+        Math.round((index / Math.max(1, Math.min(tickCount, rows.length) - 1)) * denominator)
+      )).filter((value, index, all) => index === 0 || value !== all[index - 1]);
+      const xTicks = '<div class="line-x-axis' + (isHourly || rows.length >= 7 ? ' sparse-axis' : '') + '" aria-hidden="true">'
+        + tickIndexes.map((rowIndex, tickIndex) => {
+          const position = (rowIndex / denominator) * 100;
+          const alignment = tickIndex === 0 ? "start" : tickIndex === tickIndexes.length - 1 ? "end" : "middle";
+          const label = isHourly
+            ? centralHourFormat.format(new Date(rows[rowIndex].bucketStart))
+            : rows[rowIndex].day.slice(5);
+          return '<span class="' + alignment + '" style="left:' + position.toFixed(3) + '%">'
+            + escapeText(label)
+            + '</span>';
+        }).join("")
+        + '</div>';
+      return legend
+        + '<div class="chart-shell line-chart-shell">'
+        + yAxis
+        + '<div class="line-chart-region">'
+        + '<div class="line-chart-frame">'
+        + grid
+        + '<svg class="line-chart" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">'
+        + paths
+        + '</svg>'
+        + points
+        + '</div>'
+        + xTicks
+        + '<div class="x-axis-title">' + escapeText(isHourly ? "Hour (Central Time)" : "Date") + '</div>'
         + '</div></div>';
+    }
+
+    function insightCard(title, body, tone) {
+      return '<article class="insight ' + escapeText(tone) + '"><strong>' + escapeText(title) + '</strong><p>' + escapeText(body) + '</p></article>';
+    }
+
+    function distributionRow(label, value, total, detail, tone) {
+      const share = total > 0 ? Math.round((Number(value || 0) / total) * 100) : 0;
+      return '<div class="distribution-row">'
+        + '<div><strong>' + escapeText(label) + '</strong><span>' + number(value) + ' · ' + share + '%</span></div>'
+        + '<i><b class="' + escapeText(tone) + '" style="width:' + share + '%"></b></i>'
+        + '<small>' + escapeText(detail) + '</small>'
+        + '</div>';
     }
 
     function deviceMeta(row) {
@@ -1046,7 +1398,7 @@ function adminDashboardPage(email: string): Response {
       if (row.vibeSubmitCount) parts.push(number(row.vibeSubmitCount) + " tracked vibe submits");
       if (row.historicalVibeCount) parts.push(number(row.historicalVibeCount) + " saved vibes");
       if (row.appVersion) parts.push(row.appVersion);
-      if (row.lastSeenAt) parts.push("last " + new Date(row.lastSeenAt).toLocaleString());
+      if (row.lastSeenAt) parts.push("last " + centralDateTime(row.lastSeenAt));
       return parts.length ? parts.join(" · ") : "No activity yet";
     }
 
@@ -1069,45 +1421,197 @@ function adminDashboardPage(email: string): Response {
 
     function render(payload) {
       currentPayload = payload;
+      selectedDays = Number(payload.filters.days || 30);
+      document.querySelectorAll("[data-days]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(Number(button.dataset.days) === selectedDays));
+        button.disabled = false;
+      });
       const publicMode = !payload.filters.includeInternal;
+      const period = windowPhrase(selectedDays, false);
+      const periodTitle = windowPhrase(selectedDays, true);
+      const chartGrain = selectedDays === 1 ? "Hourly" : "Daily";
       document.getElementById("filter-mode").textContent = publicMode ? "Public trend view" : "All tracked traffic";
-      document.getElementById("status").textContent = "Updated " + new Date(payload.generatedAt).toLocaleString()
+      document.getElementById("status").textContent = "Updated " + centralDateTime(payload.generatedAt)
         + (publicMode ? " · internal testers excluded" : " · internal testers included");
+      document.getElementById("audience-window-copy").textContent = chartGrain + " anonymous devices, " + period;
+      document.getElementById("vibe-window-copy").textContent = "New place ratings and contributors, " + period;
+      document.getElementById("discovery-window-copy").textContent = chartGrain + " actions, " + period;
+      document.getElementById("versions-window-copy").textContent = "Active devices, " + period;
+      document.getElementById("events-window-copy").textContent = periodTitle;
       const summary = payload.summary;
+      const previousPlacesPerContributor = summary.previousAnonymousVibers30d > 0
+        ? summary.previousVibes30d / summary.previousAnonymousVibers30d
+        : 0;
       document.getElementById("summary").innerHTML = [
-        metric("Active today", number(summary.activeToday), "Unique anonymous devices"),
-        metric("Active 7 days", number(summary.active7d), "Weekly active devices"),
-        metric("Active 30 days", number(summary.active30d), "Monthly active devices"),
-        metric("New devices", number(summary.newDevices30d), "First seen in 30 days"),
-        metric("Excluded devices", number(summary.excludedAnalyticsDevices30d), "Internal analytics IDs in 30 days"),
-        metric("Total vibes", number(summary.totalVibes), summary.firstVibeAt ? "Since " + shortDate(summary.firstVibeAt) : "All time"),
-        metric("Vibed places", number(summary.totalVibedPlaces), "All-time unique places"),
-        metric("Historical devices", number(summary.totalAnonymousVibers), "From saved vibe history"),
-        metric("Excluded seed vibes", number(summary.excludedHistoricalVibes30d), "Internal saved vibes in 30 days"),
-        metric("Vibes submitted", number(summary.vibeSubmissions30d), "Saved history, 30 days"),
-        metric("Vibes/device", summary.vibesPerDevice30d.toFixed(2), "Saved history, 30 days"),
-        metric("Tracked searches", number(summary.searches30d), "Analytics-only, no raw query text"),
-        metric("D1 / D7 retention", percent(summary.retention.day1Rate) + " / " + percent(summary.retention.day7Rate), "First seen cohorts")
+        metricCard(
+          "Active devices",
+          number(summary.active30d),
+          "Used the app " + period,
+          changeLabel(summary.active30d, summary.previousActive30d, selectedDays),
+          "audience"
+        ),
+        metricCard(
+          "New devices",
+          number(summary.newDevices30d),
+          "First seen " + period,
+          changeLabel(summary.newDevices30d, summary.previousNewDevices30d, selectedDays),
+          "growth"
+        ),
+        metricCard(
+          "Repeat-use rate",
+          selectedDays === 1 ? "n/a" : percent(summary.repeatDeviceRate30d),
+          selectedDays === 1
+            ? "Choose 7 or 30 days to measure return visits"
+            : number(summary.repeatDevices30d) + " devices active on 2+ days",
+          selectedDays === 1
+            ? "A return visit requires more than one day"
+            : summary.activeDaysPerDevice30d.toFixed(1) + " active days per device",
+          selectedDays === 1 ? "audience" : summary.repeatDeviceRate30d >= 30 ? "good" : "watch"
+        ),
+        metricCard(
+          "Places per contributor",
+          summary.vibesPerDevice30d.toFixed(1),
+          "Distinct place ratings per person who vibed",
+          previousPlacesPerContributor > 0
+            ? changeLabel(summary.vibesPerDevice30d, previousPlacesPerContributor, selectedDays)
+            : "No prior baseline",
+          "contribution"
+        ),
+        metricCard(
+          "New place ratings",
+          number(summary.vibeSubmissions30d),
+          number(summary.anonymousVibers30d) + " contributing users",
+          changeLabel(summary.vibeSubmissions30d, summary.previousVibes30d, selectedDays),
+          "content"
+        ),
+        metricCard(
+          "Place discovery",
+          number(summary.placeSelections30d),
+          number(summary.searches30d) + " searches · " + number(summary.appOpens30d) + " app opens",
+          changeLabel(summary.placeSelections30d, summary.previousPlaceSelections30d, selectedDays),
+          "discovery"
+        )
       ].join("");
 
-      document.getElementById("trend").innerHTML = columnChart(
-        payload.daily,
-        "activeDevices",
-        "vibeSubmissions",
-        "active devices",
-        "vibes"
+      const insights = [];
+      if (summary.active30d < 10) {
+        insights.push(insightCard(
+          "Early signal",
+          "Only " + number(summary.active30d) + " public devices are in the " + period + ", so percentages can swing quickly.",
+          "neutral"
+        ));
+      }
+      if (selectedDays === 1) {
+        insights.push(insightCard(
+          "Last 24 hours",
+          number(summary.active30d) + " public devices used the app in the last 24 hours. Use 7 or 30 days to evaluate repeat use.",
+          "neutral"
+        ));
+      } else if (summary.repeatDeviceRate30d >= 40) {
+        insights.push(insightCard(
+          "People are returning",
+          percent(summary.repeatDeviceRate30d) + " of active devices used the app on at least two different days.",
+          "positive"
+        ));
+      } else {
+        insights.push(insightCard(
+          "Watch repeat use",
+          number(summary.oneDayDevices30d) + " of " + number(summary.active30d) + " active devices appeared on only one day.",
+          "warning"
+        ));
+      }
+      const onePlaceShare = summary.anonymousVibers30d > 0
+        ? (summary.onePlaceContributors30d / summary.anonymousVibers30d) * 100
+        : 0;
+      if (onePlaceShare >= 60) {
+        insights.push(insightCard(
+          "Many contributors stop after one place",
+          percent(onePlaceShare) + " of people who vibed a place added only one place rating in this window.",
+          "warning"
+        ));
+      } else {
+        insights.push(insightCard(
+          "Contributors explore",
+          number(summary.twoToThreePlaceContributors30d + summary.fourPlusPlaceContributors30d)
+            + " people vibed at least two places.",
+          "positive"
+        ));
+      }
+      insights.push(insightCard(
+        "Discovery activity",
+        number(summary.searches30d) + " searches and " + number(summary.placeSelections30d)
+          + " place taps were tracked. These are separate activity totals, not a conversion funnel.",
+        "neutral"
+      ));
+      document.getElementById("insights").innerHTML = insights.join("");
+
+      const audienceRows = payload.daily.map((row) => ({
+        ...row,
+        returningDevices: Math.max(0, Number(row.activeDevices || 0) - Number(row.newDevices || 0))
+      }));
+      const audienceSeries = [
+        { key: "returningDevices", label: "Returning", className: "series-navy" },
+        { key: "newDevices", label: "New", className: "series-yellow" }
+      ];
+      document.getElementById("audience-trend").innerHTML = trendLineChart(
+        audienceRows,
+        audienceSeries,
+        "Devices",
+        { hourly: selectedDays === 1 }
       );
 
-      document.getElementById("history").innerHTML = columnChart(
+      const vibeSeries = [
+        { key: "vibeSubmissions", label: "Place ratings", className: "series-navy" },
+        { key: "uniqueVibers", label: "Contributors", className: "series-yellow" }
+      ];
+      document.getElementById("vibe-trend").innerHTML = trendLineChart(
         payload.vibeHistoryDaily,
-        "vibeSubmissions",
-        "uniqueVibers",
-        "vibes",
-        "devices"
+        vibeSeries,
+        "Count",
+        { hourly: selectedDays === 1 }
+      );
+
+      document.getElementById("contribution-depth").innerHTML = [
+        distributionRow(
+          "One place",
+          summary.onePlaceContributors30d,
+          summary.anonymousVibers30d,
+          "Likely one-and-done contributors",
+          "series-muted"
+        ),
+        distributionRow(
+          "Two to three places",
+          summary.twoToThreePlaceContributors30d,
+          summary.anonymousVibers30d,
+          "Showing meaningful exploration",
+          "series-yellow"
+        ),
+        distributionRow(
+          "Four or more places",
+          summary.fourPlusPlaceContributors30d,
+          summary.anonymousVibers30d,
+          "Your most engaged contributors",
+          "series-teal"
+        )
+      ].join("");
+
+      const discoverySeries = [
+        { key: "searchCount", label: "Searches", className: "series-navy" },
+        { key: "placeSelectCount", label: "Place taps", className: "series-yellow" }
+      ];
+      document.getElementById("discovery-trend").innerHTML = trendLineChart(
+        payload.daily,
+        discoverySeries,
+        "Actions",
+        { hourly: selectedDays === 1 }
       );
 
       const maxEvents = Math.max(...payload.topEvents.map((row) => row.count), 1);
-      document.getElementById("events").innerHTML = payload.topEvents.map((row) => listRow(row.name, row.count, maxEvents)).join("") || '<p class="empty">No events yet.</p>';
+      document.getElementById("events").innerHTML = payload.topEvents.map((row) => listRow(
+        row.name.replaceAll("_", " "),
+        row.count,
+        maxEvents
+      )).join("") || '<p class="empty">No events yet.</p>';
 
       const maxVersions = Math.max(...payload.appVersions.map((row) => row.count), 1);
       document.getElementById("versions").innerHTML = payload.appVersions.map((row) => listRow(row.name || "Unknown", row.count, maxVersions)).join("") || '<p class="empty">No app versions yet.</p>';
@@ -1118,6 +1622,9 @@ function adminDashboardPage(email: string): Response {
 
     function loadAnalytics() {
       document.getElementById("status").textContent = "Loading analytics...";
+      document.querySelectorAll("[data-days]").forEach((button) => {
+        button.disabled = true;
+      });
       return fetch(analyticsPath(), { headers: { "Accept": "application/json" } })
       .then((response) => {
         if (!response.ok) throw new Error("Analytics request failed.");
@@ -1126,10 +1633,25 @@ function adminDashboardPage(email: string): Response {
       .then(render)
       .catch((error) => {
         document.getElementById("status").textContent = error.message;
+        document.querySelectorAll("[data-days]").forEach((button) => {
+          button.disabled = false;
+        });
       });
     }
 
     document.getElementById("exclude-internal").addEventListener("change", loadAnalytics);
+    document.querySelector(".window-picker").addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-days]");
+      if (!button || button.disabled) return;
+      selectedDays = Number(button.dataset.days);
+      const dashboardURL = new URL(location.href);
+      dashboardURL.searchParams.set("days", String(selectedDays));
+      history.replaceState(null, "", dashboardURL);
+      document.querySelectorAll("[data-days]").forEach((item) => {
+        item.setAttribute("aria-pressed", String(item === button));
+      });
+      loadAnalytics();
+    });
     document.getElementById("recent-devices").addEventListener("click", (event) => {
       const button = event.target.closest("button[data-recent-index]");
       if (!button || !currentPayload) return;
@@ -1217,7 +1739,7 @@ function adminCSS(): string {
     h1, h2 { margin: 0; letter-spacing: 0; }
     h1 { font-size: clamp(2.5rem, 7vw, 5rem); line-height: 0.92; }
     h2 { font-size: 1.2rem; }
-    .session, .status, .panel-heading span, .metric small, .list-row span, .empty {
+    .session, .status, .panel-heading span, .health-card small, .health-card dt, .metric small, .list-row span, .empty {
       color: var(--muted);
       font-weight: 650;
     }
@@ -1234,6 +1756,64 @@ function adminCSS(): string {
       align-items: center;
       justify-content: space-between;
       gap: 1rem;
+    }
+    .control-actions {
+      display: flex;
+      align-items: flex-end;
+      justify-content: flex-end;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .window-picker {
+      display: grid;
+      gap: 0.3rem;
+      min-width: 16rem;
+      margin: 0;
+      padding: 0;
+      border: 0;
+    }
+    .window-picker legend {
+      color: var(--muted);
+      font-size: 0.7rem;
+      font-weight: 850;
+      line-height: 1;
+      padding: 0;
+      text-transform: uppercase;
+    }
+    .window-picker div {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      overflow: hidden;
+      border: 1px solid rgba(16, 44, 107, 0.22);
+      border-radius: 0.45rem;
+      background: rgba(255, 255, 255, 0.74);
+    }
+    .window-picker button {
+      min-height: 2.35rem;
+      border: 0;
+      border-right: 1px solid rgba(16, 44, 107, 0.16);
+      background: transparent;
+      color: var(--navy);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.78rem;
+      font-weight: 850;
+      padding: 0.45rem 0.65rem;
+    }
+    .window-picker button:last-child { border-right: 0; }
+    .window-picker button[aria-pressed="true"] {
+      background: var(--navy);
+      color: white;
+    }
+    .window-picker button:focus-visible {
+      position: relative;
+      z-index: 1;
+      outline: 0.16rem solid #198b82;
+      outline-offset: -0.16rem;
+    }
+    .window-picker button:disabled {
+      cursor: wait;
+      opacity: 0.72;
     }
     .toggle-row, .compact-toggle {
       display: flex;
@@ -1265,31 +1845,110 @@ function adminCSS(): string {
       padding: 0.4rem 0.7rem;
       white-space: nowrap;
     }
-    .metric-grid {
+    .health-grid, .metric-grid {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 0.85rem;
       margin-bottom: 0.85rem;
     }
-    .metric, .panel {
+    .metric-card {
+      display: grid;
+      grid-template-rows: auto auto auto 1fr;
+      gap: 0.35rem;
+      min-height: 10.5rem;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-top: 0.3rem solid var(--navy);
+      border-radius: 0.5rem;
+      background: var(--surface);
+      box-shadow: 0 1rem 2.2rem rgba(16, 44, 107, 0.07);
+    }
+    .metric-card.growth,
+    .metric-card.content { border-top-color: #b6ad2e; }
+    .metric-card.good,
+    .metric-card.contribution { border-top-color: #198b82; }
+    .metric-card.watch { border-top-color: #b65f45; }
+    .metric-card > span {
+      color: var(--navy);
+      font-size: 0.9rem;
+      font-weight: 850;
+    }
+    .metric-card > strong {
+      font-size: clamp(2rem, 4vw, 2.8rem);
+      line-height: 1;
+    }
+    .metric-card > small {
+      color: var(--muted);
+      font-size: 0.86rem;
+      font-weight: 650;
+      line-height: 1.35;
+    }
+    .metric-card > em {
+      align-self: end;
+      color: var(--ink);
+      font-size: 0.78rem;
+      font-style: normal;
+      font-weight: 800;
+      padding-top: 0.65rem;
+      border-top: 1px solid var(--line);
+    }
+    .section-kicker {
+      margin: 0 0 0.2rem;
+      color: var(--navy);
+      font-size: 0.7rem;
+      font-weight: 850;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+    .health-card, .metric, .panel {
       border: 1px solid var(--line);
       border-radius: 0.5rem;
       background: var(--surface);
       box-shadow: 0 1rem 2.2rem rgba(16, 44, 107, 0.07);
     }
-    .metric {
+    .health-card, .metric {
       display: grid;
-      gap: 0.25rem;
+      gap: 0.85rem;
       padding: 1rem;
     }
-    .metric span {
+    .health-main {
+      display: grid;
+      gap: 0.25rem;
+    }
+    .health-card span, .metric span {
       color: var(--navy);
       font-weight: 850;
       font-size: 0.9rem;
     }
-    .metric strong {
+    .health-card strong, .metric strong {
       font-size: 2rem;
       line-height: 1;
+    }
+    .health-card dl {
+      display: grid;
+      gap: 0.45rem;
+      margin: 0;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--line);
+    }
+    .health-card dl div {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+    .health-card dt,
+    .health-card dd {
+      margin: 0;
+      font-size: 0.84rem;
+    }
+    .health-card dt {
+      white-space: nowrap;
+    }
+    .health-card dd {
+      color: var(--ink);
+      font-weight: 850;
+      text-align: right;
     }
     .panel {
       padding: 1rem;
@@ -1306,9 +1965,375 @@ function adminCSS(): string {
       display: grid;
       gap: 0.55rem;
     }
+    .chart-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.9rem;
+      margin-bottom: 0.55rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 800;
+    }
+    .chart-legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .chart-legend i {
+      width: 0.65rem;
+      height: 0.65rem;
+      border-radius: 0.15rem;
+    }
+    .series-navy { background: var(--navy) !important; }
+    .series-yellow { background: #c1b62e !important; }
+    .series-teal { background: #198b82 !important; }
+    .series-muted { background: #8993a2 !important; }
+    .chart-shell {
+      display: grid;
+      grid-template-columns: 2.75rem minmax(0, 1fr);
+      gap: 0.45rem;
+      align-items: stretch;
+    }
+    .y-axis {
+      display: grid;
+      grid-template-rows: 1rem 1fr;
+      gap: 0.3rem;
+      min-height: 13rem;
+      padding-bottom: 2rem;
+    }
+    .y-axis strong {
+      align-self: start;
+      color: var(--muted);
+      font-size: 0.62rem;
+      font-weight: 850;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+    .y-axis div {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 0;
+    }
+    .y-axis span {
+      color: var(--muted);
+      font-size: 0.66rem;
+      font-weight: 800;
+      line-height: 1;
+      text-align: right;
+    }
+    .chart-plot {
+      position: relative;
+      min-width: max(100%, calc(var(--chart-columns) * 1.9rem));
+      min-height: 13rem;
+    }
+    .chart-grid {
+      position: absolute;
+      inset: 1.3rem 0 1.45rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      pointer-events: none;
+    }
+    .chart-grid i {
+      display: block;
+      width: 100%;
+      height: 1px;
+      background: rgba(16, 44, 107, 0.14);
+    }
+    .grouped-chart {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(var(--chart-columns), minmax(0, 1fr));
+      gap: 0.18rem;
+      width: 100%;
+      min-height: 13rem;
+      padding: 1.3rem 0 0;
+    }
+    .grouped-day {
+      position: relative;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) 1.45rem;
+      align-items: end;
+      justify-items: center;
+      min-width: 0;
+      gap: 0;
+      outline: none;
+    }
+    .bar-pair {
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      gap: 0.08rem;
+      width: 100%;
+      height: 100%;
+    }
+    .bar-column {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      width: min(44%, 0.8rem);
+      height: 100%;
+    }
+    .bar-column b {
+      position: absolute;
+      bottom: calc(var(--bar-height, 0%) + 0.12rem);
+      color: var(--ink);
+      font-size: 0.58rem;
+      font-weight: 900;
+      line-height: 1;
+      pointer-events: none;
+    }
+    .bar-column i {
+      display: block;
+      width: 100%;
+      min-height: 0;
+      border-radius: 0.25rem 0.25rem 0 0;
+    }
+    .grouped-day em {
+      color: var(--muted);
+      font-size: 0.56rem;
+      font-style: normal;
+      font-weight: 800;
+      line-height: 1;
+      padding-top: 0.5rem;
+      white-space: nowrap;
+    }
+    .axis-label-hidden {
+      visibility: hidden;
+    }
+    .line-chart-shell {
+      min-width: 0;
+    }
+    .line-y-axis {
+      min-height: 0;
+      height: 12.3rem;
+      padding-bottom: 0;
+    }
+    .line-chart-region {
+      min-width: 0;
+    }
+    .line-chart-frame {
+      position: relative;
+      height: 11rem;
+      margin-top: 1.3rem;
+    }
+    .line-chart-grid {
+      inset: 0;
+    }
+    .line-chart {
+      position: absolute;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+    .line-series {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 4;
+      vector-effect: non-scaling-stroke;
+    }
+    .line-series.series-navy { stroke: var(--navy); }
+    .line-series.series-yellow { stroke: #c1b62e; }
+    .line-series.series-teal { stroke: #198b82; }
+    .line-point {
+      --series-color: var(--navy);
+      position: absolute;
+      z-index: 2;
+      width: 1.8rem;
+      height: 1.8rem;
+      margin: 0;
+      padding: 0;
+      transform: translate(-50%, 50%);
+      border: 0;
+      border-radius: 50%;
+      background: transparent !important;
+      cursor: pointer;
+    }
+    .line-point.series-yellow { --series-color: #c1b62e; }
+    .line-point.series-teal { --series-color: #198b82; }
+    .line-point::before {
+      content: "";
+      position: absolute;
+      inset: 50% auto auto 50%;
+      width: 0.62rem;
+      height: 0.62rem;
+      transform: translate(-50%, -50%);
+      border: 0.16rem solid white;
+      border-radius: 50%;
+      background: var(--series-color);
+      box-shadow: 0 0 0 1px var(--series-color);
+    }
+    .line-point > span {
+      position: absolute;
+      left: 50%;
+      top: calc(100% + 0.05rem);
+      z-index: 6;
+      display: none;
+      width: max-content;
+      max-width: min(13rem, 70vw);
+      transform: translateX(-50%);
+      border-radius: 0.35rem;
+      background: var(--ink);
+      color: white;
+      font-size: 0.68rem;
+      font-weight: 750;
+      line-height: 1.3;
+      padding: 0.42rem 0.55rem;
+      box-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.18);
+      pointer-events: none;
+    }
+    .line-point:hover > span,
+    .line-point:focus-visible > span,
+    .line-point:focus > span {
+      display: block;
+    }
+    .line-point.edge-start > span {
+      left: 0;
+      transform: none;
+    }
+    .line-point.edge-end > span {
+      left: auto;
+      right: 0;
+      transform: none;
+    }
+    .line-point:focus-visible {
+      outline: 2px solid var(--navy);
+      outline-offset: 1px;
+    }
+    .line-x-axis {
+      position: relative;
+      height: 1.45rem;
+      border-top: 1px solid rgba(16, 44, 107, 0.14);
+    }
+    .line-x-axis span {
+      position: absolute;
+      top: 0.45rem;
+      color: var(--muted);
+      font-size: 0.6rem;
+      font-weight: 800;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .line-x-axis span.start { transform: none; }
+    .line-x-axis span.middle { transform: translateX(-50%); }
+    .line-x-axis span.end { transform: translateX(-100%); }
+    .grouped-day:hover::after,
+    .grouped-day:focus-visible::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% - 1rem);
+      z-index: 5;
+      width: max-content;
+      max-width: 14rem;
+      transform: translateX(-50%);
+      border-radius: 0.35rem;
+      background: var(--ink);
+      color: white;
+      font-size: 0.68rem;
+      font-style: normal;
+      font-weight: 750;
+      line-height: 1.3;
+      padding: 0.42rem 0.55rem;
+      box-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.18);
+      pointer-events: none;
+    }
+    .x-axis-title {
+      color: var(--muted);
+      font-size: 0.62rem;
+      font-weight: 850;
+      line-height: 1;
+      margin-top: 0.25rem;
+      text-align: center;
+      text-transform: uppercase;
+    }
+    .insight-panel { border-top: 0.3rem solid var(--yellow); }
+    .insight-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.7rem;
+    }
+    .insight {
+      padding: 0.8rem;
+      border-left: 0.25rem solid var(--navy);
+      background: rgba(16, 44, 107, 0.05);
+    }
+    .insight.positive {
+      border-left-color: #198b82;
+      background: rgba(25, 139, 130, 0.08);
+    }
+    .insight.warning {
+      border-left-color: #b65f45;
+      background: rgba(182, 95, 69, 0.08);
+    }
+    .insight strong {
+      color: var(--ink);
+      font-size: 0.92rem;
+    }
+    .insight p {
+      margin: 0.25rem 0 0;
+      color: var(--muted);
+      font-size: 0.83rem;
+      font-weight: 650;
+      line-height: 1.4;
+    }
+    .distribution {
+      display: grid;
+      gap: 0.9rem;
+    }
+    .distribution-row {
+      display: grid;
+      gap: 0.3rem;
+    }
+    .distribution-row > div {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.8rem;
+    }
+    .distribution-row > div span,
+    .distribution-row small {
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+    .distribution-row > i {
+      display: block;
+      height: 0.75rem;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(16, 44, 107, 0.08);
+    }
+    .distribution-row > i b {
+      display: block;
+      min-width: 0;
+      height: 100%;
+      border-radius: inherit;
+    }
+    .admin-tools {
+      margin-top: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 0.5rem;
+      background: rgba(255, 255, 255, 0.55);
+    }
+    .admin-tools > summary {
+      cursor: pointer;
+      color: var(--navy);
+      font-weight: 850;
+      padding: 1rem;
+    }
+    .admin-tools-body {
+      padding: 0 1rem 0.2rem;
+    }
     .chart-viewport {
       overflow-x: auto;
-      overflow-y: hidden;
+      overflow-y: visible;
       padding: 0 0.1rem 0.15rem;
       margin: 0 -0.1rem;
       scrollbar-width: thin;
@@ -1504,9 +2529,78 @@ function adminCSS(): string {
       padding: 0.45rem 0.7rem;
     }
     @media (max-width: 760px) {
-      .admin-header, .two-column, .controls { display: block; }
-      .session { text-align: left; margin-top: 0.75rem; }
-      .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .admin-shell {
+        padding:
+          max(0.8rem, env(safe-area-inset-top))
+          max(0.75rem, env(safe-area-inset-right))
+          max(1.2rem, env(safe-area-inset-bottom))
+          max(0.75rem, env(safe-area-inset-left));
+      }
+      .admin-header, .two-column { display: block; }
+      .admin-header { margin-bottom: 0.8rem; }
+      h1 {
+        font-size: clamp(2.35rem, 14vw, 3.5rem);
+        line-height: 0.96;
+      }
+      .session {
+        overflow-wrap: anywhere;
+        text-align: left;
+        margin-top: 0.75rem;
+      }
+      .status {
+        padding: 0.75rem;
+        margin-bottom: 0.75rem;
+      }
+      .controls {
+        display: grid;
+        gap: 0.75rem;
+      }
+      .control-actions {
+        display: grid;
+        grid-template-columns: 1fr;
+        justify-items: stretch;
+        order: -1;
+        margin: 0;
+      }
+      .window-picker { min-width: 0; width: 100%; }
+      .window-picker legend {
+        font-size: 0.75rem;
+        margin-bottom: 0.15rem;
+      }
+      .window-picker button {
+        min-height: 2.75rem;
+        font-size: 0.9rem;
+        padding: 0.55rem 0.4rem;
+      }
+      .toggle-row {
+        min-height: 2.75rem;
+        align-items: flex-start;
+      }
+      .toggle-row input, .compact-toggle input {
+        width: 1.25rem;
+        height: 1.25rem;
+        margin-top: 0.1rem;
+      }
+      .pill {
+        justify-self: start;
+        white-space: normal;
+      }
+      .health-grid, .metric-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.65rem;
+        margin-bottom: 0.65rem;
+      }
+      .metric-card {
+        min-height: 0;
+        padding: 0.8rem;
+      }
+      .metric-card > strong { font-size: clamp(1.8rem, 10vw, 2.35rem); }
+      .metric-card > small { font-size: 0.8rem; }
+      .panel {
+        padding: 0.8rem;
+        margin-bottom: 0.65rem;
+      }
+      .insight-grid { grid-template-columns: 1fr; }
       .panel-heading {
         align-items: flex-start;
         flex-direction: column;
@@ -1516,6 +2610,22 @@ function adminCSS(): string {
       .chart-viewport {
         margin-inline: -0.25rem;
         padding-inline: 0.25rem;
+      }
+      .line-chart-shell {
+        grid-template-columns: 2.15rem minmax(0, 1fr);
+        gap: 0.35rem;
+      }
+      .line-chart-frame {
+        height: 10rem;
+      }
+      .line-y-axis {
+        height: 11.3rem;
+      }
+      .line-series {
+        stroke-width: 3;
+      }
+      .line-x-axis.sparse-axis span:nth-child(even) {
+        display: none;
       }
       .column-chart {
         gap: 0.18rem;
@@ -1532,9 +2642,48 @@ function adminCSS(): string {
         border-radius: 0.25rem 0.25rem 0.1rem 0.1rem;
       }
       .column-bar em { font-size: 0.55rem; }
-      .pill { display: inline-block; margin-top: 0.75rem; }
+      .grouped-chart {
+        gap: 0.1rem;
+        min-height: 11rem;
+      }
+      .chart-shell { grid-template-columns: 2.35rem minmax(0, 1fr); gap: 0.3rem; }
+      .chart-plot {
+        min-width: max(100%, calc(var(--chart-columns) * 2.5rem));
+        min-height: 11rem;
+      }
+      .y-axis { min-height: 11rem; }
+      .bar-pair { gap: 0.06rem; }
+      .bar-column { width: min(45%, 0.58rem); }
+      .bar-column b { font-size: 0.52rem; }
+      .grouped-day em { font-size: 0.54rem; }
       .device-label-form { grid-template-columns: 1fr; }
       .compact-toggle { justify-content: flex-start; }
+      .device-row {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .device-row small { grid-column: 1; }
+      .device-row button {
+        min-height: 2.75rem;
+        width: 100%;
+      }
+    }
+    @media (max-width: 390px) {
+      .health-grid, .metric-grid { grid-template-columns: 1fr; }
+      .metric-card {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-rows: auto auto;
+        align-items: center;
+        gap: 0.25rem 0.65rem;
+      }
+      .metric-card > strong {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+      }
+      .metric-card > small { grid-column: 1; }
+      .metric-card > em {
+        grid-column: 1 / -1;
+        grid-row: 3;
+      }
     }
   `;
 }
@@ -1556,8 +2705,10 @@ function adminJSONHeaders(): Headers {
 }
 
 function adminAnalyticsOptions(url: URL): AdminAnalyticsOptions {
+  const requestedDays = Number.parseInt(url.searchParams.get("days") ?? "", 10);
   return {
     includeInternal: ["1", "true", "yes"].includes((url.searchParams.get("include_internal") ?? "").toLowerCase()),
+    days: requestedDays === 1 || requestedDays === 7 || requestedDays === 30 ? requestedDays : 30,
   };
 }
 
@@ -1615,17 +2766,300 @@ function activeEventWhere(alias?: string): string {
   return `${alias}.moderation_status = 'active' AND ${alias}.is_deleted = 0`;
 }
 
-async function buildAdminAnalyticsPayload(env: Env, options: AdminAnalyticsOptions = { includeInternal: false }) {
-  const today = dayString(new Date());
+async function buildRolling24HourMetrics(env: Env, options: AdminAnalyticsOptions, now: Date) {
+  const through = now.toISOString();
+  const since = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+  const previousSince = new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString();
+  const analyticsEventFilter = adminAnalyticsDeviceAllowedSQL("ae", options);
+  const analyticsDeviceFilter = adminAnalyticsDeviceAllowedSQL("ad", options);
+  const anonymousUserFilter = adminAnonymousUserAllowedSQL("ve", options);
+  const [
+    analytics,
+    previousAnalytics,
+    newDevices,
+    content,
+    previousContent,
+    viberDepth,
+    excluded,
+    topEvents,
+    appVersions,
+    hourlyAnalytics,
+    hourlyNewDevices,
+    hourlyContent,
+  ] = await Promise.all([
+    env.DB.prepare(
+      `SELECT
+         COUNT(DISTINCT ae.analytics_device_id) AS active_devices,
+         COUNT(*) AS event_count,
+         COALESCE(SUM(CASE WHEN ae.event_name = 'app_open' THEN 1 ELSE 0 END), 0) AS app_open_count,
+         COALESCE(SUM(CASE WHEN ae.event_name = 'search_performed' THEN 1 ELSE 0 END), 0) AS search_count,
+         COALESCE(SUM(CASE WHEN ae.event_name = 'place_selected' THEN 1 ELSE 0 END), 0) AS place_select_count,
+         COALESCE(SUM(CASE WHEN ae.event_name = 'vibe_submitted' THEN 1 ELSE 0 END), 0) AS vibe_submit_count,
+         COALESCE(SUM(CASE WHEN ae.event_name LIKE 'account_%' THEN 1 ELSE 0 END), 0) AS account_event_count
+       FROM analytics_events ae
+       WHERE ae.created_at >= ?
+         AND ae.created_at < ?
+         AND ${analyticsEventFilter}`
+    )
+      .bind(since, through)
+      .first<Record<string, number | null>>(),
+    env.DB.prepare(
+      `SELECT
+         COUNT(DISTINCT ae.analytics_device_id) AS active_devices,
+         COALESCE(SUM(CASE WHEN ae.event_name = 'app_open' THEN 1 ELSE 0 END), 0) AS app_open_count,
+         COALESCE(SUM(CASE WHEN ae.event_name = 'search_performed' THEN 1 ELSE 0 END), 0) AS search_count,
+         COALESCE(SUM(CASE WHEN ae.event_name = 'place_selected' THEN 1 ELSE 0 END), 0) AS place_select_count
+       FROM analytics_events ae
+       WHERE ae.created_at >= ?
+         AND ae.created_at < ?
+         AND ${analyticsEventFilter}`
+    )
+      .bind(previousSince, since)
+      .first<Record<string, number | null>>(),
+    env.DB.prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN ad.first_seen_at >= ? AND ad.first_seen_at < ? THEN 1 ELSE 0 END), 0) AS current_devices,
+         COALESCE(SUM(CASE WHEN ad.first_seen_at >= ? AND ad.first_seen_at < ? THEN 1 ELSE 0 END), 0) AS previous_devices
+       FROM analytics_devices ad
+       WHERE ad.first_seen_at >= ?
+         AND ad.first_seen_at < ?
+         AND ${analyticsDeviceFilter}`
+    )
+      .bind(since, through, previousSince, since, previousSince, through)
+      .first<Record<string, number | null>>(),
+    env.DB.prepare(
+      `SELECT
+         COUNT(*) AS vibe_submissions,
+         COUNT(DISTINCT ve.anonymous_user_id) AS unique_vibers,
+         COUNT(DISTINCT ve.place_id) AS vibed_places
+       FROM vibe_events ve
+       WHERE ${activeEventWhere("ve")}
+         AND ve.created_at >= ?
+         AND ve.created_at < ?
+         AND ${anonymousUserFilter}`
+    )
+      .bind(since, through)
+      .first<Record<string, number | null>>(),
+    env.DB.prepare(
+      `SELECT
+         COUNT(*) AS vibe_submissions,
+         COUNT(DISTINCT ve.anonymous_user_id) AS unique_vibers,
+         COUNT(DISTINCT ve.place_id) AS vibed_places
+       FROM vibe_events ve
+       WHERE ${activeEventWhere("ve")}
+         AND ve.created_at >= ?
+         AND ve.created_at < ?
+         AND ${anonymousUserFilter}`
+    )
+      .bind(previousSince, since)
+      .first<Record<string, number | null>>(),
+    env.DB.prepare(
+      `SELECT
+         COUNT(*) AS contributors,
+         COALESCE(SUM(CASE WHEN place_count = 1 THEN 1 ELSE 0 END), 0) AS one_place_contributors,
+         COALESCE(SUM(CASE WHEN place_count BETWEEN 2 AND 3 THEN 1 ELSE 0 END), 0) AS two_to_three_place_contributors,
+         COALESCE(SUM(CASE WHEN place_count >= 4 THEN 1 ELSE 0 END), 0) AS four_plus_place_contributors
+       FROM (
+         SELECT ve.anonymous_user_id, COUNT(DISTINCT ve.place_id) AS place_count
+         FROM vibe_events ve
+         WHERE ${activeEventWhere("ve")}
+           AND ve.created_at >= ?
+           AND ve.created_at < ?
+           AND ${anonymousUserFilter}
+         GROUP BY ve.anonymous_user_id
+       )`
+    )
+      .bind(since, through)
+      .first<Record<string, number | null>>(),
+    env.DB.prepare(
+      `SELECT
+         (SELECT COUNT(DISTINCT ae.analytics_device_id)
+          FROM analytics_events ae
+          INNER JOIN admin_device_labels dl
+            ON dl.identity_type = 'analytics_device'
+           AND dl.identity_id = ae.analytics_device_id
+           AND dl.excluded_from_core_metrics = 1
+          WHERE ae.created_at >= ? AND ae.created_at < ?) AS excluded_analytics_devices,
+         (SELECT COUNT(DISTINCT ve.anonymous_user_id)
+          FROM vibe_events ve
+          INNER JOIN admin_device_labels dl
+            ON dl.identity_type = 'anonymous_user'
+           AND dl.identity_id = ve.anonymous_user_id
+           AND dl.excluded_from_core_metrics = 1
+          WHERE ${activeEventWhere("ve")}
+            AND ve.created_at >= ? AND ve.created_at < ?) AS excluded_historical_vibers,
+         (SELECT COUNT(*)
+          FROM vibe_events ve
+          INNER JOIN admin_device_labels dl
+            ON dl.identity_type = 'anonymous_user'
+           AND dl.identity_id = ve.anonymous_user_id
+           AND dl.excluded_from_core_metrics = 1
+          WHERE ${activeEventWhere("ve")}
+            AND ve.created_at >= ? AND ve.created_at < ?) AS excluded_historical_vibes`
+    )
+      .bind(since, through, since, through, since, through)
+      .first<Record<string, number | null>>(),
+    env.DB.prepare(
+      `SELECT ae.event_name AS name, COUNT(*) AS count
+       FROM analytics_events ae
+       WHERE ae.created_at >= ?
+         AND ae.created_at < ?
+         AND ${analyticsEventFilter}
+       GROUP BY ae.event_name
+       ORDER BY count DESC, ae.event_name ASC
+       LIMIT 12`
+    )
+      .bind(since, through)
+      .all<AnalyticsNameCountRow>(),
+    env.DB.prepare(
+      `SELECT COALESCE(ae.app_version, 'Unknown') AS name, COUNT(DISTINCT ae.analytics_device_id) AS count
+       FROM analytics_events ae
+       WHERE ae.created_at >= ?
+         AND ae.created_at < ?
+         AND ${analyticsEventFilter}
+       GROUP BY COALESCE(ae.app_version, 'Unknown')
+       ORDER BY count DESC, name ASC
+       LIMIT 12`
+    )
+      .bind(since, through)
+      .all<AnalyticsNameCountRow>(),
+    env.DB.prepare(
+      `SELECT
+         CAST((julianday(ae.created_at) - julianday(?)) * 24 AS INTEGER) AS bucket_index,
+         COUNT(DISTINCT ae.analytics_device_id) AS active_devices,
+         COUNT(*) AS event_count,
+         COALESCE(SUM(CASE WHEN ae.event_name = 'app_open' THEN 1 ELSE 0 END), 0) AS app_open_count,
+         COALESCE(SUM(CASE WHEN ae.event_name = 'search_performed' THEN 1 ELSE 0 END), 0) AS search_count,
+         COALESCE(SUM(CASE WHEN ae.event_name = 'place_selected' THEN 1 ELSE 0 END), 0) AS place_select_count,
+         COALESCE(SUM(CASE WHEN ae.event_name = 'vibe_submitted' THEN 1 ELSE 0 END), 0) AS vibe_submit_count,
+         COALESCE(SUM(CASE WHEN ae.event_name LIKE 'account_%' THEN 1 ELSE 0 END), 0) AS account_event_count
+       FROM analytics_events ae
+       WHERE ae.created_at >= ?
+         AND ae.created_at < ?
+         AND ${analyticsEventFilter}
+       GROUP BY bucket_index
+       HAVING bucket_index BETWEEN 0 AND 23
+       ORDER BY bucket_index ASC`
+    )
+      .bind(since, since, through)
+      .all<AnalyticsHourlyRow>(),
+    env.DB.prepare(
+      `SELECT
+         CAST((julianday(ad.first_seen_at) - julianday(?)) * 24 AS INTEGER) AS bucket_index,
+         COUNT(*) AS new_devices
+       FROM analytics_devices ad
+       WHERE ad.first_seen_at >= ?
+         AND ad.first_seen_at < ?
+         AND ${analyticsDeviceFilter}
+       GROUP BY bucket_index
+       HAVING bucket_index BETWEEN 0 AND 23
+       ORDER BY bucket_index ASC`
+    )
+      .bind(since, since, through)
+      .all<AnalyticsHourlyNewDevicesRow>(),
+    env.DB.prepare(
+      `SELECT
+         CAST((julianday(ve.created_at) - julianday(?)) * 24 AS INTEGER) AS bucket_index,
+         COUNT(*) AS vibe_submissions,
+         COUNT(DISTINCT ve.anonymous_user_id) AS unique_vibers,
+         COUNT(DISTINCT ve.place_id) AS vibed_places
+       FROM vibe_events ve
+       WHERE ${activeEventWhere("ve")}
+         AND ve.created_at >= ?
+         AND ve.created_at < ?
+         AND ${anonymousUserFilter}
+       GROUP BY bucket_index
+       HAVING bucket_index BETWEEN 0 AND 23
+       ORDER BY bucket_index ASC`
+    )
+      .bind(since, since, through)
+      .all<VibeHistoryHourlyRow>(),
+  ]);
+
+  const analyticsByHour = new Map(
+    (hourlyAnalytics.results ?? []).map((row) => [rowNumber(row.bucket_index), row])
+  );
+  const newDevicesByHour = new Map(
+    (hourlyNewDevices.results ?? []).map((row) => [rowNumber(row.bucket_index), row])
+  );
+  const contentByHour = new Map(
+    (hourlyContent.results ?? []).map((row) => [rowNumber(row.bucket_index), row])
+  );
+  const sinceTime = new Date(since).getTime();
+  const hourly = Array.from({ length: 24 }, (_, bucketIndex) => {
+    const analyticsRow = analyticsByHour.get(bucketIndex);
+    const newDeviceRow = newDevicesByHour.get(bucketIndex);
+    const contentRow = contentByHour.get(bucketIndex);
+    return {
+      bucketStart: new Date(sinceTime + bucketIndex * 60 * 60 * 1000).toISOString(),
+      bucketEnd: new Date(sinceTime + (bucketIndex + 1) * 60 * 60 * 1000).toISOString(),
+      activeDevices: rowNumber(analyticsRow?.active_devices),
+      newDevices: rowNumber(newDeviceRow?.new_devices),
+      events: rowNumber(analyticsRow?.event_count),
+      appOpens: rowNumber(analyticsRow?.app_open_count),
+      searches: rowNumber(analyticsRow?.search_count),
+      placeSelections: rowNumber(analyticsRow?.place_select_count),
+      trackedVibeSubmissions: rowNumber(analyticsRow?.vibe_submit_count),
+      accountEvents: rowNumber(analyticsRow?.account_event_count),
+      vibeSubmissions: rowNumber(contentRow?.vibe_submissions),
+      uniqueVibers: rowNumber(contentRow?.unique_vibers),
+      vibedPlaces: rowNumber(contentRow?.vibed_places),
+    };
+  });
+
+  return {
+    since,
+    through,
+    activeDevices: rowNumber(analytics?.active_devices),
+    previousActiveDevices: rowNumber(previousAnalytics?.active_devices),
+    newDevices: rowNumber(newDevices?.current_devices),
+    previousNewDevices: rowNumber(newDevices?.previous_devices),
+    events: rowNumber(analytics?.event_count),
+    appOpens: rowNumber(analytics?.app_open_count),
+    previousAppOpens: rowNumber(previousAnalytics?.app_open_count),
+    searches: rowNumber(analytics?.search_count),
+    previousSearches: rowNumber(previousAnalytics?.search_count),
+    placeSelections: rowNumber(analytics?.place_select_count),
+    previousPlaceSelections: rowNumber(previousAnalytics?.place_select_count),
+    trackedVibeSubmissions: rowNumber(analytics?.vibe_submit_count),
+    accountEvents: rowNumber(analytics?.account_event_count),
+    vibeSubmissions: rowNumber(content?.vibe_submissions),
+    previousVibeSubmissions: rowNumber(previousContent?.vibe_submissions),
+    uniqueVibers: rowNumber(content?.unique_vibers),
+    previousUniqueVibers: rowNumber(previousContent?.unique_vibers),
+    vibedPlaces: rowNumber(content?.vibed_places),
+    previousVibedPlaces: rowNumber(previousContent?.vibed_places),
+    onePlaceContributors: rowNumber(viberDepth?.one_place_contributors),
+    twoToThreePlaceContributors: rowNumber(viberDepth?.two_to_three_place_contributors),
+    fourPlusPlaceContributors: rowNumber(viberDepth?.four_plus_place_contributors),
+    excludedAnalyticsDevices: rowNumber(excluded?.excluded_analytics_devices),
+    excludedHistoricalVibers: rowNumber(excluded?.excluded_historical_vibers),
+    excludedHistoricalVibes: rowNumber(excluded?.excluded_historical_vibes),
+    topEvents: topEvents.results ?? [],
+    appVersions: appVersions.results ?? [],
+    hourly,
+  };
+}
+
+export async function buildAdminAnalyticsPayload(env: Env, options: AdminAnalyticsOptions = { includeInternal: false }) {
+  const windowDays: AdminAnalyticsWindowDays = options.days === 1 || options.days === 7 || options.days === 30
+    ? options.days
+    : 30;
+  const now = new Date();
+  const rolling24Hours = windowDays === 1 ? await buildRolling24HourMetrics(env, options, now) : null;
+  const today = dayString(now);
   const since7 = addDays(today, -6);
-  const since30 = addDays(today, -29);
-  const day1Retention = await fetchRetentionMetric(env, 1, since30, addDays(today, -1), options);
-  const day7Retention = await fetchRetentionMetric(env, 7, since30, addDays(today, -7), options);
+  const sinceWindow = addDays(today, -(windowDays - 1));
+  const summarySince = sinceWindow < since7 ? sinceWindow : since7;
+  const sincePreviousWindow = addDays(today, -(windowDays * 2 - 1));
+  const throughPreviousWindow = addDays(today, -windowDays);
+  const day1Retention = await fetchRetentionMetric(env, 1, sinceWindow, addDays(today, -1), options);
+  const day7Retention = await fetchRetentionMetric(env, 7, sinceWindow, addDays(today, -7), options);
   const analyticsDeviceFilter = adminAnalyticsDeviceAllowedSQL("dd", options);
   const analyticsDevicesFilter = adminAnalyticsDeviceAllowedSQL("ad", options);
   const analyticsEventsFilter = adminAnalyticsDeviceAllowedSQL("ae", options);
   const anonymousUserFilter = adminAnonymousUserAllowedSQL("ve", options);
-  const [summary, newDevices, contentTotals, excludedSummary, dailyResult, vibeHistoryResult, eventsResult, versionsResult, labelsResult, recentAnalyticsDevices, recentAnonymousUsers] = await Promise.all([
+  const [summary, newDevices, previousPeriod, usageDepth, contentTotals, viberDepth, excludedSummary, dailyResult, vibeHistoryResult, eventsResult, versionsResult, labelsResult, recentAnalyticsDevices, recentAnonymousUsers] = await Promise.all([
     env.DB.prepare(
       `SELECT
          COUNT(DISTINCT CASE WHEN dd.day = ? THEN dd.analytics_device_id END) AS active_today,
@@ -1641,26 +3075,89 @@ async function buildAdminAnalyticsPayload(env: Env, options: AdminAnalyticsOptio
        WHERE dd.day >= ?
          AND ${analyticsDeviceFilter}`
     )
-      .bind(today, since7, since30, since30, since30, since30, since30, since30, since30, since30)
+      .bind(today, since7, sinceWindow, sinceWindow, sinceWindow, sinceWindow, sinceWindow, sinceWindow, sinceWindow, summarySince)
       .first<AnalyticsSummaryRow>(),
     env.DB.prepare(`SELECT COUNT(*) AS new_devices_30d FROM analytics_devices ad WHERE ad.first_seen_day >= ? AND ${analyticsDevicesFilter}`)
-      .bind(since30)
+      .bind(sinceWindow)
       .first<AnalyticsNewDevicesRow>(),
+    env.DB.prepare(
+      `SELECT
+         COUNT(DISTINCT dd.analytics_device_id) AS active_devices,
+         (SELECT COUNT(*)
+          FROM analytics_devices ad
+          WHERE ad.first_seen_day BETWEEN ? AND ?
+            AND ${analyticsDevicesFilter}) AS new_devices,
+         COALESCE(SUM(dd.app_open_count), 0) AS app_opens,
+         COALESCE(SUM(dd.search_count), 0) AS searches,
+         COALESCE(SUM(dd.place_select_count), 0) AS place_selects
+       FROM analytics_device_days dd
+       WHERE dd.day BETWEEN ? AND ?
+         AND ${analyticsDeviceFilter}`
+    )
+      .bind(sincePreviousWindow, throughPreviousWindow, sincePreviousWindow, throughPreviousWindow)
+      .first<AnalyticsPreviousPeriodRow>(),
+    env.DB.prepare(
+      `SELECT
+         COUNT(*) AS active_devices,
+         COALESCE(SUM(CASE WHEN active_days = 1 THEN 1 ELSE 0 END), 0) AS one_day_devices,
+         COALESCE(SUM(CASE WHEN active_days >= 2 THEN 1 ELSE 0 END), 0) AS repeat_devices,
+         COALESCE(SUM(CASE WHEN active_days >= 4 THEN 1 ELSE 0 END), 0) AS loyal_devices,
+         COALESCE(SUM(active_days), 0) AS active_device_days
+       FROM (
+         SELECT dd.analytics_device_id, COUNT(DISTINCT dd.day) AS active_days
+         FROM analytics_device_days dd
+         WHERE dd.day >= ?
+           AND ${analyticsDeviceFilter}
+         GROUP BY dd.analytics_device_id
+       )`
+    )
+      .bind(sinceWindow)
+      .first<AnalyticsUsageDepthRow>(),
     env.DB.prepare(
       `SELECT COUNT(*) AS total_vibes,
               COUNT(DISTINCT place_id) AS total_vibed_places,
               COUNT(DISTINCT anonymous_user_id) AS total_anonymous_vibers,
               COUNT(CASE WHEN substr(created_at, 1, 10) >= ? THEN 1 END) AS vibes_30d,
+              COUNT(CASE WHEN substr(created_at, 1, 10) BETWEEN ? AND ? THEN 1 END) AS vibes_previous_30d,
               COUNT(DISTINCT CASE WHEN substr(created_at, 1, 10) >= ? THEN anonymous_user_id END) AS anonymous_vibers_30d,
+              COUNT(DISTINCT CASE WHEN substr(created_at, 1, 10) BETWEEN ? AND ? THEN anonymous_user_id END) AS anonymous_vibers_previous_30d,
               COUNT(DISTINCT CASE WHEN substr(created_at, 1, 10) >= ? THEN place_id END) AS vibed_places_30d,
+              COUNT(DISTINCT CASE WHEN substr(created_at, 1, 10) BETWEEN ? AND ? THEN place_id END) AS vibed_places_previous_30d,
               MIN(created_at) AS first_vibe_at,
               MAX(created_at) AS last_vibe_at
        FROM vibe_events ve
        WHERE ${activeEventWhere("ve")}
          AND ${anonymousUserFilter}`
     )
-      .bind(since30, since30, since30)
+      .bind(
+        sinceWindow,
+        sincePreviousWindow,
+        throughPreviousWindow,
+        sinceWindow,
+        sincePreviousWindow,
+        throughPreviousWindow,
+        sinceWindow,
+        sincePreviousWindow,
+        throughPreviousWindow
+      )
       .first<AnalyticsContentTotalsRow>(),
+    env.DB.prepare(
+      `SELECT
+         COUNT(*) AS contributors,
+         COALESCE(SUM(CASE WHEN place_count = 1 THEN 1 ELSE 0 END), 0) AS one_place_contributors,
+         COALESCE(SUM(CASE WHEN place_count BETWEEN 2 AND 3 THEN 1 ELSE 0 END), 0) AS two_to_three_place_contributors,
+         COALESCE(SUM(CASE WHEN place_count >= 4 THEN 1 ELSE 0 END), 0) AS four_plus_place_contributors
+       FROM (
+         SELECT ve.anonymous_user_id, COUNT(*) AS place_count
+         FROM vibe_events ve
+         WHERE ${activeEventWhere("ve")}
+           AND ${anonymousUserFilter}
+           AND substr(ve.created_at, 1, 10) >= ?
+         GROUP BY ve.anonymous_user_id
+       )`
+    )
+      .bind(sinceWindow)
+      .first<ViberDepthRow>(),
     env.DB.prepare(
       `SELECT
          (SELECT COUNT(DISTINCT dd.analytics_device_id)
@@ -1687,7 +3184,7 @@ async function buildAdminAnalyticsPayload(env: Env, options: AdminAnalyticsOptio
           WHERE ${activeEventWhere("ve")}
             AND substr(ve.created_at, 1, 10) >= ?) AS excluded_historical_vibes_30d`
     )
-      .bind(since30, since30, since30)
+      .bind(sinceWindow, sinceWindow, sinceWindow)
       .first<AdminExcludedSummaryRow>(),
     env.DB.prepare(
       `SELECT
@@ -1706,7 +3203,7 @@ async function buildAdminAnalyticsPayload(env: Env, options: AdminAnalyticsOptio
        GROUP BY dd.day
        ORDER BY dd.day ASC`
     )
-      .bind(since30)
+      .bind(sinceWindow)
       .all<AnalyticsDailyRow>(),
     env.DB.prepare(
       `SELECT
@@ -1721,7 +3218,7 @@ async function buildAdminAnalyticsPayload(env: Env, options: AdminAnalyticsOptio
        GROUP BY substr(created_at, 1, 10)
        ORDER BY day ASC`
     )
-      .bind(since30)
+      .bind(sinceWindow)
       .all<VibeHistoryDailyRow>(),
     env.DB.prepare(
       `SELECT ae.event_name AS name, COUNT(*) AS count
@@ -1732,7 +3229,7 @@ async function buildAdminAnalyticsPayload(env: Env, options: AdminAnalyticsOptio
        ORDER BY count DESC, event_name ASC
        LIMIT 12`
     )
-      .bind(since30)
+      .bind(sinceWindow)
       .all<AnalyticsNameCountRow>(),
     env.DB.prepare(
       `SELECT COALESCE(dd.app_version, 'Unknown') AS name, COUNT(DISTINCT dd.analytics_device_id) AS count
@@ -1743,7 +3240,7 @@ async function buildAdminAnalyticsPayload(env: Env, options: AdminAnalyticsOptio
        ORDER BY count DESC, name ASC
        LIMIT 12`
     )
-      .bind(since30)
+      .bind(sinceWindow)
       .all<AnalyticsNameCountRow>(),
     env.DB.prepare(
       `SELECT
@@ -1850,38 +3347,69 @@ async function buildAdminAnalyticsPayload(env: Env, options: AdminAnalyticsOptio
     ).all<AdminRecentDeviceRow>(),
   ]);
 
-  const active30d = rowNumber(summary?.active_30d);
-  const historicalVibes30d = rowNumber(contentTotals?.vibes_30d);
-  const historicalVibers30d = rowNumber(contentTotals?.anonymous_vibers_30d);
+  const active30d = rolling24Hours?.activeDevices ?? rowNumber(summary?.active_30d);
+  const historicalVibes30d = rolling24Hours?.vibeSubmissions ?? rowNumber(contentTotals?.vibes_30d);
+  const historicalVibers30d = rolling24Hours?.uniqueVibers ?? rowNumber(contentTotals?.anonymous_vibers_30d);
+  const repeatDevices30d = rowNumber(usageDepth?.repeat_devices);
+  const measuredActiveDevices30d = rolling24Hours?.activeDevices ?? rowNumber(usageDepth?.active_devices);
 
   return {
     generatedAt: new Date().toISOString(),
     filters: {
       includeInternal: options.includeInternal,
       excludedLabelsActive: !options.includeInternal,
+      days: windowDays,
+      since: rolling24Hours?.since ?? sinceWindow,
+      through: rolling24Hours?.through ?? today,
+      timeZone: "America/Chicago",
     },
     summary: {
-      activeToday: rowNumber(summary?.active_today),
+      activeToday: rolling24Hours?.activeDevices ?? rowNumber(summary?.active_today),
       active7d: rowNumber(summary?.active_7d),
       active30d,
-      newDevices30d: rowNumber(newDevices?.new_devices_30d),
-      excludedAnalyticsDevices30d: rowNumber(excludedSummary?.excluded_analytics_devices_30d),
-      excludedHistoricalVibers30d: rowNumber(excludedSummary?.excluded_historical_vibers_30d),
-      excludedHistoricalVibes30d: rowNumber(excludedSummary?.excluded_historical_vibes_30d),
-      events30d: rowNumber(summary?.events_30d),
-      appOpens30d: rowNumber(summary?.app_opens_30d),
-      searches30d: rowNumber(summary?.searches_30d),
-      placeSelections30d: rowNumber(summary?.place_selects_30d),
+      newDevices30d: rolling24Hours?.newDevices ?? rowNumber(newDevices?.new_devices_30d),
+      previousActive30d: rolling24Hours?.previousActiveDevices ?? rowNumber(previousPeriod?.active_devices),
+      previousNewDevices30d: rolling24Hours?.previousNewDevices ?? rowNumber(previousPeriod?.new_devices),
+      previousAppOpens30d: rolling24Hours?.previousAppOpens ?? rowNumber(previousPeriod?.app_opens),
+      previousSearches30d: rolling24Hours?.previousSearches ?? rowNumber(previousPeriod?.searches),
+      previousPlaceSelections30d: rolling24Hours?.previousPlaceSelections ?? rowNumber(previousPeriod?.place_selects),
+      excludedAnalyticsDevices30d: rolling24Hours?.excludedAnalyticsDevices
+        ?? rowNumber(excludedSummary?.excluded_analytics_devices_30d),
+      excludedHistoricalVibers30d: rolling24Hours?.excludedHistoricalVibers
+        ?? rowNumber(excludedSummary?.excluded_historical_vibers_30d),
+      excludedHistoricalVibes30d: rolling24Hours?.excludedHistoricalVibes
+        ?? rowNumber(excludedSummary?.excluded_historical_vibes_30d),
+      events30d: rolling24Hours?.events ?? rowNumber(summary?.events_30d),
+      appOpens30d: rolling24Hours?.appOpens ?? rowNumber(summary?.app_opens_30d),
+      searches30d: rolling24Hours?.searches ?? rowNumber(summary?.searches_30d),
+      placeSelections30d: rolling24Hours?.placeSelections ?? rowNumber(summary?.place_selects_30d),
       vibeSubmissions30d: historicalVibes30d,
-      trackedVibeSubmissions30d: rowNumber(summary?.vibes_30d),
-      accountEvents30d: rowNumber(summary?.account_events_30d),
+      trackedVibeSubmissions30d: rolling24Hours?.trackedVibeSubmissions ?? rowNumber(summary?.vibes_30d),
+      accountEvents30d: rolling24Hours?.accountEvents ?? rowNumber(summary?.account_events_30d),
+      oneDayDevices30d: rowNumber(usageDepth?.one_day_devices),
+      repeatDevices30d,
+      loyalDevices30d: rowNumber(usageDepth?.loyal_devices),
+      repeatDeviceRate30d: measuredActiveDevices30d > 0 ? Math.round((repeatDevices30d / measuredActiveDevices30d) * 1000) / 10 : 0,
+      activeDaysPerDevice30d: measuredActiveDevices30d > 0
+        ? Math.round((rowNumber(usageDepth?.active_device_days) / measuredActiveDevices30d) * 100) / 100
+        : 0,
       vibesPerDevice30d: historicalVibers30d > 0 ? Math.round((historicalVibes30d / historicalVibers30d) * 100) / 100 : 0,
       vibesPerActiveDevice30d: active30d > 0 ? Math.round((historicalVibes30d / active30d) * 100) / 100 : 0,
+      previousVibes30d: rolling24Hours?.previousVibeSubmissions ?? rowNumber(contentTotals?.vibes_previous_30d),
+      previousAnonymousVibers30d: rolling24Hours?.previousUniqueVibers
+        ?? rowNumber(contentTotals?.anonymous_vibers_previous_30d),
+      previousVibedPlaces30d: rolling24Hours?.previousVibedPlaces
+        ?? rowNumber(contentTotals?.vibed_places_previous_30d),
       totalVibes: rowNumber(contentTotals?.total_vibes),
       totalVibedPlaces: rowNumber(contentTotals?.total_vibed_places),
       totalAnonymousVibers: rowNumber(contentTotals?.total_anonymous_vibers),
-      vibedPlaces30d: rowNumber(contentTotals?.vibed_places_30d),
+      vibedPlaces30d: rolling24Hours?.vibedPlaces ?? rowNumber(contentTotals?.vibed_places_30d),
       anonymousVibers30d: historicalVibers30d,
+      onePlaceContributors30d: rolling24Hours?.onePlaceContributors ?? rowNumber(viberDepth?.one_place_contributors),
+      twoToThreePlaceContributors30d: rolling24Hours?.twoToThreePlaceContributors
+        ?? rowNumber(viberDepth?.two_to_three_place_contributors),
+      fourPlusPlaceContributors30d: rolling24Hours?.fourPlusPlaceContributors
+        ?? rowNumber(viberDepth?.four_plus_place_contributors),
       firstVibeAt: contentTotals?.first_vibe_at ?? null,
       lastVibeAt: contentTotals?.last_vibe_at ?? null,
       retention: {
@@ -1893,10 +3421,35 @@ async function buildAdminAnalyticsPayload(env: Env, options: AdminAnalyticsOptio
         day7Rate: day7Retention.rate,
       },
     },
-    daily: fillDailyRows(today, 30, dailyResult.results ?? []),
-    vibeHistoryDaily: fillVibeHistoryRows(today, 30, vibeHistoryResult.results ?? []),
-    topEvents: (eventsResult.results ?? []).map((row) => ({ name: row.name ?? "unknown", count: rowNumber(row.count) })),
-    appVersions: (versionsResult.results ?? []).map((row) => ({ name: row.name ?? "Unknown", count: rowNumber(row.count) })),
+    daily: rolling24Hours
+      ? rolling24Hours.hourly.map((row) => ({
+          day: row.bucketStart,
+          bucketStart: row.bucketStart,
+          bucketEnd: row.bucketEnd,
+          activeDevices: row.activeDevices,
+          newDevices: row.newDevices,
+          events: row.events,
+          appOpens: row.appOpens,
+          searches: row.searches,
+          placeSelections: row.placeSelections,
+          vibeSubmissions: row.trackedVibeSubmissions,
+          accountEvents: row.accountEvents,
+        }))
+      : fillDailyRows(today, windowDays, dailyResult.results ?? []),
+    vibeHistoryDaily: rolling24Hours
+      ? rolling24Hours.hourly.map((row) => ({
+          day: row.bucketStart,
+          bucketStart: row.bucketStart,
+          bucketEnd: row.bucketEnd,
+          vibeSubmissions: row.vibeSubmissions,
+          uniqueVibers: row.uniqueVibers,
+          vibedPlaces: row.vibedPlaces,
+        }))
+      : fillVibeHistoryRows(today, windowDays, vibeHistoryResult.results ?? []),
+    topEvents: (rolling24Hours?.topEvents ?? eventsResult.results ?? [])
+      .map((row) => ({ name: row.name ?? "unknown", count: rowNumber(row.count) })),
+    appVersions: (rolling24Hours?.appVersions ?? versionsResult.results ?? [])
+      .map((row) => ({ name: row.name ?? "Unknown", count: rowNumber(row.count) })),
     deviceLabels: (labelsResult.results ?? []).map(serializeAdminDeviceLabel),
     recentDevices: [...(recentAnalyticsDevices.results ?? []), ...(recentAnonymousUsers.results ?? [])].map(serializeAdminRecentDevice),
   };
@@ -2128,9 +3681,35 @@ function addDays(day: string, offset: number): string {
   return dayString(date);
 }
 
-async function getVibeTags(env: Env): Promise<Response> {
+function requestSupportsCurrentTaxonomy(request: Request): boolean {
+  const headerVersion = cleanString(request.headers.get(TAXONOMY_VERSION_HEADER));
+  const queryVersion = cleanString(new URL(request.url).searchParams.get("taxonomy_version"));
+  return headerVersion === CURRENT_TAXONOMY_VERSION_ID || queryVersion === CURRENT_TAXONOMY_VERSION_ID;
+}
+
+function isCurrentOnlyTag(tagID: VibeTagID): boolean {
+  return tagID === "bougie" || tagID === "low_key";
+}
+
+function clientCompatibleTagID(tagID: VibeTagID, supportsCurrentTaxonomy: boolean): VibeTagID {
+  if (supportsCurrentTaxonomy) {
+    return tagID;
+  }
+  if (tagID === "bougie") {
+    return "iconic";
+  }
+  if (tagID === "low_key") {
+    return "worth_the_drive";
+  }
+  return tagID;
+}
+
+async function getVibeTags(env: Env, supportsCurrentTaxonomy: boolean): Promise<Response> {
   const tags = await fetchActiveVibeTags(env);
-  return json({ tags }, { headers: publicCacheHeaders(CACHE_TTL_SECONDS.vibeTaxonomy) });
+  return json(
+    { tags: supportsCurrentTaxonomy ? tags : tags.filter((tag) => !isCurrentOnlyTag(tag.id)) },
+    { headers: publicCacheHeaders(CACHE_TTL_SECONDS.vibeTaxonomy) }
+  );
 }
 
 async function collectAnalyticsEvent(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -3639,12 +5218,15 @@ async function getNearbyPlaces(request: Request, url: URL, env: Env): Promise<Re
         deviceIDHash
       )
     : new Map<string, VibeEventRow>();
-  const places = entries.map((entry) => serializeNearbyPlace(entry.row, entry.distance, eventByPlaceID.get(entry.row.id) ?? null));
+  const supportsV2 = requestSupportsCurrentTaxonomy(request);
+  const places = entries.map((entry) =>
+    serializeNearbyPlace(entry.row, entry.distance, eventByPlaceID.get(entry.row.id) ?? null, supportsV2)
+  );
 
   return json({ places }, deviceIDHash ? undefined : { headers: publicCacheHeaders(CACHE_TTL_SECONDS.nearby) });
 }
 
-async function getPlaceMapCells(url: URL, env: Env): Promise<Response> {
+async function getPlaceMapCells(request: Request, url: URL, env: Env): Promise<Response> {
   const latitude = numberParam(url, "lat");
   const longitude = numberParam(url, "lng");
   const radius = Math.min(
@@ -3713,7 +5295,8 @@ async function getPlaceMapCells(url: URL, env: Env): Promise<Response> {
 
   const cells = aggregateMapCells(
     (result.results ?? []).filter((row) => distanceMeters(latitude, longitude, row.latitude, row.longitude) <= radius),
-    cellSize
+    cellSize,
+    requestSupportsCurrentTaxonomy(request)
   )
     .slice(0, MAX_MAP_CELL_RESPONSE_CELLS);
 
@@ -3737,7 +5320,155 @@ async function getPlace(id: string, request: Request, env: Env): Promise<Respons
   }
 
   const deviceIDHash = await deviceHashFromRequest(request);
-  return json({ place: await serializePlace(place, undefined, env, deviceIDHash) });
+  return json({ place: await serializePlace(place, undefined, env, deviceIDHash, requestSupportsCurrentTaxonomy(request)) });
+}
+
+const SAVED_PLACE_BROAD_SEARCH_TOKENS = new Set([
+  "atm", "asian", "bakery", "bar", "bars", "bbq", "breakfast", "brewery", "burger", "burgers",
+  "cafe", "cafes", "cajun", "chinese", "coffee", "dinner", "drink", "drinks", "entertainment",
+  "food", "gas", "grocery", "groceries", "gym", "hotel", "hotels", "italian", "lunch", "mexican",
+  "movie", "movies", "museum", "museums", "park", "parks", "pharmacy", "pizza", "restaurant",
+  "restaurants", "shop", "shopping", "shops", "store", "stores", "taco", "tacos", "theater", "theatre",
+]);
+
+function normalizedPlaceNameTokens(value: string): string[] {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .toLowerCase()
+    .replace(/['’]s\b/gu, "")
+    .split(/[^a-z0-9]+/u)
+    .filter(Boolean);
+}
+
+function placeNameMatchTier(query: string, candidateName: string): number | null {
+  const queryTokens = normalizedPlaceNameTokens(query);
+  const candidateTokens = normalizedPlaceNameTokens(candidateName);
+  if (queryTokens.length < 2 || candidateTokens.length < queryTokens.length) return null;
+  if (queryTokens.every((token, index) => token === candidateTokens[index]) && queryTokens.length === candidateTokens.length) return 0;
+  if (queryTokens.every((token, index) => token === candidateTokens[index])) return 1;
+  if (queryTokens.every((token, index) => {
+    const candidateToken = candidateTokens[index];
+    if (!candidateToken) return false;
+    if (token.length <= 2 && (index < queryTokens.length - 1 || queryTokens.length === 2)) {
+      return candidateToken === token;
+    }
+    return candidateToken.startsWith(token);
+  })) return 2;
+  if (queryTokens.every((token) => token.length >= 3 && candidateTokens.includes(token))) return 3;
+  return null;
+}
+
+function isSpecificSavedPlaceNameQuery(query: string): boolean {
+  const tokens = normalizedPlaceNameTokens(query);
+  const isBroad = tokens.length > 0 && tokens.every((token) =>
+    SAVED_PLACE_BROAD_SEARCH_TOKENS.has(token) ||
+    (token.endsWith("s") && SAVED_PLACE_BROAD_SEARCH_TOKENS.has(token.slice(0, -1)))
+  );
+  return tokens.length >= 2 && !isBroad && !/\d/u.test(query);
+}
+
+async function searchSavedPlaces(request: Request, url: URL, env: Env): Promise<Response> {
+  const query = cleanString(url.searchParams.get("q") ?? url.searchParams.get("query"));
+  const latitude = numberParam(url, "lat");
+  const longitude = numberParam(url, "lng");
+  const rawLimit = numberParam(url, "limit") ?? 12;
+  const limit = Math.max(1, Math.min(Math.floor(rawLimit), 20));
+
+  if (!query || query.length < 2) {
+    return json({ places: [] });
+  }
+  if ((latitude === null) !== (longitude === null)) {
+    return json({ error: "lat and lng must be supplied together." }, { status: 400 });
+  }
+  if (latitude !== null && longitude !== null && !isValidCoordinate(latitude, longitude)) {
+    return json({ error: "lat or lng is out of range." }, { status: 400 });
+  }
+
+  const tokens = normalizedPlaceNameTokens(query).slice(0, 6);
+  if (tokens.length === 0) {
+    return json({ places: [] });
+  }
+
+  const isSpecificNameSearch = isSpecificSavedPlaceNameQuery(query);
+  const searchableText =
+    "LOWER(p.name || ' ' || COALESCE(p.street_address, '') || ' ' || COALESCE(p.city, '') || ' ' || COALESCE(p.region, ''))";
+  const matchClause = isSpecificNameSearch
+    ? "LOWER(p.name) LIKE ?"
+    : tokens.map(() => `${searchableText} LIKE ?`).join(" AND ");
+  const candidateLimit = isSpecificNameSearch ? Math.max(limit * 10, 100) : limit;
+  const result = await env.DB.prepare(
+    `SELECT p.id,
+            p.provider,
+            p.provider_place_id,
+            p.name,
+            p.latitude,
+            p.longitude,
+            p.street_address,
+            p.category,
+            p.primary_category,
+            p.provider_category,
+            p.city,
+            p.region,
+            p.country,
+            p.created_at,
+            p.updated_at,
+            pvs.total_vibes AS stats_total_vibes,
+            pvs.top_vibe_tag_id AS stats_top_vibe_tag_id,
+            pvs.top_vibe_percent AS stats_top_vibe_percent,
+            pvs.second_vibe_tag_id AS stats_second_vibe_tag_id,
+            pvs.second_vibe_percent AS stats_second_vibe_percent,
+            pvs.last_30_day_total_vibes AS stats_last_30_day_total_vibes,
+            pvs.last_30_day_top_vibe_tag_id AS stats_last_30_day_top_vibe_tag_id,
+            pvs.last_30_day_top_vibe_percent AS stats_last_30_day_top_vibe_percent,
+            pvs.last_year_total_vibes AS stats_last_year_total_vibes,
+            pvs.last_year_top_vibe_tag_id AS stats_last_year_top_vibe_tag_id,
+            pvs.last_year_top_vibe_percent AS stats_last_year_top_vibe_percent,
+            pvs.updated_at AS stats_updated_at
+     FROM places p
+     JOIN place_vibe_stats pvs ON pvs.place_id = p.id
+     WHERE pvs.total_vibes > 0
+       AND ${matchClause}
+     ORDER BY pvs.total_vibes DESC,
+              p.name ASC
+     LIMIT ?`
+  )
+    .bind(
+      ...(isSpecificNameSearch ? [`%${tokens[0]}%`] : tokens.map((token) => `%${token}%`)),
+      candidateLimit
+    )
+    .all<NearbyPlaceRow>();
+
+  const rows = (result.results ?? [])
+    .filter((row) => !isSpecificNameSearch || placeNameMatchTier(query, row.name) !== null)
+    .sort((left, right) => {
+      if (!isSpecificNameSearch) return 0;
+      const tierDifference = (placeNameMatchTier(query, left.name) ?? 99) - (placeNameMatchTier(query, right.name) ?? 99);
+      if (tierDifference !== 0) return tierDifference;
+      if (latitude !== null && longitude !== null) {
+        const distanceDifference =
+          distanceMeters(latitude, longitude, left.latitude, left.longitude) -
+          distanceMeters(latitude, longitude, right.latitude, right.longitude);
+        if (Math.abs(distanceDifference) > 25) return distanceDifference;
+      }
+      if (left.stats_total_vibes !== right.stats_total_vibes) return right.stats_total_vibes - left.stats_total_vibes;
+      return left.name.localeCompare(right.name);
+    })
+    .slice(0, limit);
+  const deviceIDHash = await deviceHashFromRequest(request);
+  const eventByPlaceID = deviceIDHash
+    ? await fetchVibeEventsForDeviceByPlaceIDs(env, rows.map((row) => row.id), deviceIDHash)
+    : new Map<string, VibeEventRow>();
+  const supportsV2 = requestSupportsCurrentTaxonomy(request);
+  const places = rows.map((row) => {
+    const distance =
+      latitude !== null && longitude !== null
+        ? distanceMeters(latitude, longitude, row.latitude, row.longitude)
+        : undefined;
+    return serializeNearbyPlace(row, distance, eventByPlaceID.get(row.id) ?? null, supportsV2);
+  });
+
+  return json({ places });
 }
 
 async function searchProviderPlaces(url: URL, env: Env): Promise<Response> {
@@ -4135,7 +5866,10 @@ async function upsertPlace(request: Request, env: Env): Promise<Response> {
     return json({ error: "Place could not be saved." }, { status: 500 });
   }
 
-  return json({ place: await serializePlace(place, undefined, env) }, { status: 201 });
+  return json(
+    { place: await serializePlace(place, undefined, env, null, requestSupportsCurrentTaxonomy(request)) },
+    { status: 201 }
+  );
 }
 
 async function upsertPlaceExternalID(
@@ -4212,6 +5946,10 @@ async function upsertVibe(request: Request, env: Env, ctx?: ExecutionContext): P
   if (!parsedTags.ok) {
     return json({ error: parsedTags.error }, { status: 400 });
   }
+  const supportsV2 = requestSupportsCurrentTaxonomy(request);
+  if (!supportsV2 && parsedTags.tagIDs.some(isCurrentOnlyTag)) {
+    return json({ error: "Update VIBES Y'ALL to use Bougie or Low-key." }, { status: 400 });
+  }
 
   const primaryTagID = parsedTags.tagIDs[0];
   const secondaryTagID = parsedTags.tagIDs[1] ?? null;
@@ -4248,7 +5986,7 @@ async function upsertVibe(request: Request, env: Env, ctx?: ExecutionContext): P
   const submissionContext = cleanString(body.value.submission_context ?? body.value.submissionContext) ?? source;
   const placeSnapshotJSON = placeSnapshotForVibe(placeForSubmission);
 
-  await env.DB.prepare(
+  const submissionStatement = env.DB.prepare(
     `INSERT INTO vibe_events (
        id, place_id, anonymous_user_id, primary_vibe_tag_id, secondary_vibe_tag_id, third_vibe_tag_id, source, app_version,
        taxonomy_version_id, submission_context, place_snapshot_json, created_at, updated_at, is_flagged, is_deleted, moderation_status
@@ -4266,8 +6004,7 @@ async function upsertVibe(request: Request, env: Env, ctx?: ExecutionContext): P
        updated_at = excluded.updated_at,
        is_deleted = 0,
        moderation_status = 'active'`
-  )
-    .bind(
+  ).bind(
       eventID,
       placeID,
       eventAnonymousUserID,
@@ -4281,11 +6018,24 @@ async function upsertVibe(request: Request, env: Env, ctx?: ExecutionContext): P
       placeSnapshotJSON,
       existing?.created_at ?? now,
       now
-    )
-    .run();
+    );
 
-  await refreshPlaceVibeStats(env, placeID, now);
-  await refreshPlaceVibeTagStats(env, placeID, now);
+  const refreshJobStatement = env.DB.prepare(
+    `INSERT INTO aggregate_refresh_jobs (
+       place_id, requested_at, next_attempt_at, attempts, last_error
+     ) VALUES (?, ?, ?, 0, NULL)
+     ON CONFLICT(place_id) DO UPDATE SET
+       requested_at = excluded.requested_at,
+       next_attempt_at = excluded.next_attempt_at,
+       attempts = 0,
+       last_error = NULL`
+  ).bind(placeID, now, now);
+
+  // D1 batch execution is atomic: a durable vibe can never be committed without
+  // a durable refresh job that can repair its derived rollups.
+  await env.DB.batch([submissionStatement, refreshJobStatement]);
+
+  await refreshImmediatePlaceVibeStats(env, placeID, now);
   await mirrorLegacyRating(env, eventID, placeID, deviceIDHash, primaryTagID, secondaryTagID, thirdTagID, existing?.created_at ?? now, now);
 
   if (wasFirstVibe) {
@@ -4331,13 +6081,95 @@ async function upsertVibe(request: Request, env: Env, ctx?: ExecutionContext): P
     return json({ error: "Vibe could not be saved." }, { status: 500 });
   }
 
-  return json({
-    place: await serializePlace(place, undefined, env, deviceIDHash),
-    vibe_event: serializeVibeEvent(event),
-    rating: serializeLegacyRating(event),
+  const response = json({
+    place: await serializePlace(place, undefined, env, deviceIDHash, supportsV2),
+    vibe_event: serializeVibeEvent(event, supportsV2),
+    rating: serializeLegacyRating(event, supportsV2),
     discovery: {
       was_first_vibe: wasFirstVibe,
     },
+  });
+
+  const derivedRefresh = processAggregateRefreshJob(env, placeID);
+  if (ctx) {
+    ctx.waitUntil(derivedRefresh);
+  } else {
+    await derivedRefresh;
+  }
+
+  return response;
+}
+
+async function deleteVibe(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext | undefined,
+  placeID: string
+): Promise<Response> {
+  const place = await fetchPlaceByID(env, placeID);
+  if (!place) {
+    return json({ error: "Place not found." }, { status: 404 });
+  }
+
+  const deviceIDHash = await deviceHashFromRequest(request);
+  if (!deviceIDHash) {
+    return json({ error: "X-Vibe-Device-ID-Hash is required." }, { status: 400 });
+  }
+
+  const anonymousUserID = anonymousUserIDForDeviceHash(deviceIDHash);
+  const candidateAnonymousUserIDs = await anonymousUserIDsForPrimary(env, anonymousUserID);
+  const existing = await fetchVibeEventForUsers(env, placeID, candidateAnonymousUserIDs);
+  const supportsCurrentTaxonomy = requestSupportsCurrentTaxonomy(request);
+
+  if (!existing) {
+    return json({
+      deleted: false,
+      place: await serializePlace(place, undefined, env, deviceIDHash, supportsCurrentTaxonomy),
+    });
+  }
+
+  const now = new Date().toISOString();
+  const deleteStatement = env.DB.prepare(
+    `UPDATE vibe_events
+     SET is_deleted = 1, updated_at = ?
+     WHERE id = ? AND place_id = ? AND is_deleted = 0`
+  ).bind(now, existing.id, placeID);
+  const refreshJobStatement = env.DB.prepare(
+    `INSERT INTO aggregate_refresh_jobs (
+       place_id, requested_at, next_attempt_at, attempts, last_error
+     ) VALUES (?, ?, ?, 0, NULL)
+     ON CONFLICT(place_id) DO UPDATE SET
+       requested_at = excluded.requested_at,
+       next_attempt_at = excluded.next_attempt_at,
+       attempts = 0,
+       last_error = NULL`
+  ).bind(placeID, now, now);
+  const legacyDeleteStatement = env.DB.prepare(
+    "DELETE FROM ratings WHERE id = ? OR (place_id = ? AND device_id_hash = ?)"
+  ).bind(existing.id, placeID, deviceIDHash);
+
+  // Keep the durable delete and its aggregate repair job atomic, matching submissions.
+  await env.DB.batch([deleteStatement, refreshJobStatement, legacyDeleteStatement]);
+  await refreshImmediatePlaceVibeStats(env, placeID, now);
+
+  const analyticsWrite = recordAnalyticsEvent(env, {
+    eventName: "vibe_deleted",
+    deviceIDHash,
+    platform: sourceFromRequest(request),
+    appVersion: cleanString(request.headers.get("X-Vibe-App-Version")),
+    createdAt: now,
+    properties: sanitizeAnalyticsProperties(null, { place_id: placeID }),
+  });
+  const derivedRefresh = processAggregateRefreshJob(env, placeID);
+  if (ctx) {
+    ctx.waitUntil(Promise.all([analyticsWrite, derivedRefresh]).then(() => undefined));
+  } else {
+    await Promise.all([analyticsWrite, derivedRefresh]);
+  }
+
+  return json({
+    deleted: true,
+    place: await serializePlace(place, undefined, env, deviceIDHash, supportsCurrentTaxonomy),
   });
 }
 
@@ -4454,10 +6286,13 @@ async function serializePlace(
   row: PlaceRow,
   distanceMetersValue: number | undefined,
   env: Env,
-  deviceIDHash?: string | null
+  deviceIDHash?: string | null,
+  supportsV2 = false
 ) {
   const stats = await fetchPlaceVibeStats(env, row.id);
-  const topVibes = stats && stats.total_vibes > 0 ? await fetchTopVibes(env, row.id, stats.total_vibes, 3, stats.top_vibe_tag_id) : [];
+  const topVibes = stats && stats.total_vibes > 0
+    ? await fetchTopVibes(env, row.id, stats.total_vibes, 3, stats.top_vibe_tag_id, supportsV2)
+    : [];
   const myEvent = deviceIDHash ? await fetchVibeEventForDevice(env, row.id, deviceIDHash) : null;
   const recentPositivePercentage =
     stats && stats.last_30_day_total_vibes > 0 ? await fetchRecentPositivePercentage(env, row.id, stats.last_30_day_total_vibes, 30) : 0;
@@ -4485,30 +6320,41 @@ async function serializePlace(
             rating_count: stats.total_vibes,
             total_vibes: stats.total_vibes,
             average_score: averageScoreForStats(topVibes),
-            top_vibe_tag: stats.top_vibe_tag_id ? legacyDisplayNameForTag(stats.top_vibe_tag_id) : null,
-            top_vibe_tag_id: stats.top_vibe_tag_id,
+            top_vibe_tag: stats.top_vibe_tag_id
+              ? legacyDisplayNameForTag(clientCompatibleTagID(stats.top_vibe_tag_id, supportsV2))
+              : null,
+            top_vibe_tag_id: stats.top_vibe_tag_id ? clientCompatibleTagID(stats.top_vibe_tag_id, supportsV2) : null,
             top_vibe_percent: stats.top_vibe_percent,
-            second_vibe_tag_id: stats.second_vibe_tag_id,
+            second_vibe_tag_id: stats.second_vibe_tag_id ? clientCompatibleTagID(stats.second_vibe_tag_id, supportsV2) : null,
             second_vibe_percent: stats.second_vibe_percent,
             last_30_day_total_vibes: stats.last_30_day_total_vibes,
-            last_30_day_top_vibe_tag_id: stats.last_30_day_top_vibe_tag_id,
+            last_30_day_top_vibe_tag_id: stats.last_30_day_top_vibe_tag_id
+              ? clientCompatibleTagID(stats.last_30_day_top_vibe_tag_id, supportsV2)
+              : null,
             last_30_day_top_vibe_percent: stats.last_30_day_top_vibe_percent,
             last_year_total_vibes: stats.last_year_total_vibes,
-            last_year_top_vibe_tag_id: stats.last_year_top_vibe_tag_id,
+            last_year_top_vibe_tag_id: stats.last_year_top_vibe_tag_id
+              ? clientCompatibleTagID(stats.last_year_top_vibe_tag_id, supportsV2)
+              : null,
             last_year_top_vibe_percent: stats.last_year_top_vibe_percent,
             top_vibes: topVibes,
             recent_vibe_count: stats.last_30_day_total_vibes,
             recent_positive_percentage: recentPositivePercentage,
             updated_at: stats.updated_at,
           },
-    my_rating: myEvent ? serializeLegacyRating(myEvent) : null,
-    my_vibe_event: myEvent ? serializeVibeEvent(myEvent) : null,
+    my_rating: myEvent ? serializeLegacyRating(myEvent, supportsV2) : null,
+    my_vibe_event: myEvent ? serializeVibeEvent(myEvent, supportsV2) : null,
     distance_meters: distanceMetersValue,
   };
 }
 
-function serializeNearbyPlace(row: NearbyPlaceRow, distanceMetersValue: number | undefined, myEvent: VibeEventRow | null) {
-  const topVibes = topVibesFromNearbyStats(row);
+function serializeNearbyPlace(
+  row: NearbyPlaceRow,
+  distanceMetersValue: number | undefined,
+  myEvent: VibeEventRow | null,
+  supportsV2: boolean
+) {
+  const topVibes = topVibesFromNearbyStats(row, supportsV2);
   const recentPositivePercentage =
     row.stats_last_30_day_total_vibes > 0 && row.stats_last_30_day_top_vibe_tag_id && POSITIVE_TAG_IDS.has(row.stats_last_30_day_top_vibe_tag_id)
       ? Math.round(row.stats_last_30_day_top_vibe_percent ?? 0)
@@ -4534,29 +6380,37 @@ function serializeNearbyPlace(row: NearbyPlaceRow, distanceMetersValue: number |
       rating_count: row.stats_total_vibes,
       total_vibes: row.stats_total_vibes,
       average_score: averageScoreForStats(topVibes),
-      top_vibe_tag: row.stats_top_vibe_tag_id ? legacyDisplayNameForTag(row.stats_top_vibe_tag_id) : null,
-      top_vibe_tag_id: row.stats_top_vibe_tag_id,
+      top_vibe_tag: row.stats_top_vibe_tag_id
+        ? legacyDisplayNameForTag(clientCompatibleTagID(row.stats_top_vibe_tag_id, supportsV2))
+        : null,
+      top_vibe_tag_id: row.stats_top_vibe_tag_id ? clientCompatibleTagID(row.stats_top_vibe_tag_id, supportsV2) : null,
       top_vibe_percent: row.stats_top_vibe_percent,
-      second_vibe_tag_id: row.stats_second_vibe_tag_id,
+      second_vibe_tag_id: row.stats_second_vibe_tag_id
+        ? clientCompatibleTagID(row.stats_second_vibe_tag_id, supportsV2)
+        : null,
       second_vibe_percent: row.stats_second_vibe_percent,
       last_30_day_total_vibes: row.stats_last_30_day_total_vibes,
-      last_30_day_top_vibe_tag_id: row.stats_last_30_day_top_vibe_tag_id,
+      last_30_day_top_vibe_tag_id: row.stats_last_30_day_top_vibe_tag_id
+        ? clientCompatibleTagID(row.stats_last_30_day_top_vibe_tag_id, supportsV2)
+        : null,
       last_30_day_top_vibe_percent: row.stats_last_30_day_top_vibe_percent,
       last_year_total_vibes: row.stats_last_year_total_vibes,
-      last_year_top_vibe_tag_id: row.stats_last_year_top_vibe_tag_id,
+      last_year_top_vibe_tag_id: row.stats_last_year_top_vibe_tag_id
+        ? clientCompatibleTagID(row.stats_last_year_top_vibe_tag_id, supportsV2)
+        : null,
       last_year_top_vibe_percent: row.stats_last_year_top_vibe_percent,
       top_vibes: topVibes,
       recent_vibe_count: row.stats_last_30_day_total_vibes,
       recent_positive_percentage: recentPositivePercentage,
       updated_at: row.stats_updated_at,
     },
-    my_rating: myEvent ? serializeLegacyRating(myEvent) : null,
-    my_vibe_event: myEvent ? serializeVibeEvent(myEvent) : null,
+    my_rating: myEvent ? serializeLegacyRating(myEvent, supportsV2) : null,
+    my_vibe_event: myEvent ? serializeVibeEvent(myEvent, supportsV2) : null,
     distance_meters: distanceMetersValue,
   };
 }
 
-function aggregateMapCells(rows: MapCellPlaceRow[], cellSizeMeters: number) {
+function aggregateMapCells(rows: MapCellPlaceRow[], cellSizeMeters: number, supportsV2: boolean) {
   type MapCellAccumulator = {
     id: string;
     x: number;
@@ -4590,8 +6444,8 @@ function aggregateMapCells(rows: MapCellPlaceRow[], cellSizeMeters: number) {
     cell.longitudeSum += row.longitude;
     cell.count += 1;
     cell.totalVibes += row.stats_total_vibes;
-    addMapCellTagCount(cell.tagCounts, row.stats_top_vibe_tag_id, row.stats_top_vibe_percent, row.stats_total_vibes);
-    addMapCellTagCount(cell.tagCounts, row.stats_second_vibe_tag_id, row.stats_second_vibe_percent, row.stats_total_vibes);
+    addMapCellTagCount(cell.tagCounts, row.stats_top_vibe_tag_id, row.stats_top_vibe_percent, row.stats_total_vibes, supportsV2);
+    addMapCellTagCount(cell.tagCounts, row.stats_second_vibe_tag_id, row.stats_second_vibe_percent, row.stats_total_vibes, supportsV2);
     cells.set(id, cell);
   }
 
@@ -4626,13 +6480,18 @@ function addMapCellTagCount(
   counts: Map<VibeTagID, number>,
   tagID: VibeTagID | null,
   percentage: number | null,
-  totalVibes: number
+  totalVibes: number,
+  supportsV2: boolean
 ): void {
   if (!tagID || percentage === null || percentage <= 0 || totalVibes <= 0) {
     return;
   }
 
-  counts.set(tagID, (counts.get(tagID) ?? 0) + Math.max(1, Math.round((totalVibes * percentage) / 100)));
+  const compatibleTagID = clientCompatibleTagID(tagID, supportsV2);
+  counts.set(
+    compatibleTagID,
+    (counts.get(compatibleTagID) ?? 0) + Math.max(1, Math.round((totalVibes * percentage) / 100))
+  );
 }
 
 function dominantMapCellTag(counts: Map<VibeTagID, number>): VibeTagID | null {
@@ -4675,7 +6534,7 @@ function recommendedMapCellSize(radiusMeters: number): number {
   return Math.min(Math.max(cellSize, MIN_MAP_CELL_SIZE_METERS), MAX_MAP_CELL_SIZE_METERS);
 }
 
-function topVibesFromNearbyStats(row: NearbyPlaceRow) {
+function topVibesFromNearbyStats(row: NearbyPlaceRow, supportsV2: boolean) {
   const topVibes: Array<{
     vibe_tag: string;
     vibe_tag_id: VibeTagID;
@@ -4687,8 +6546,8 @@ function topVibesFromNearbyStats(row: NearbyPlaceRow) {
     percentage: number;
   }> = [];
 
-  addNearbyTopVibe(topVibes, row.stats_top_vibe_tag_id, row.stats_top_vibe_percent, row.stats_total_vibes);
-  addNearbyTopVibe(topVibes, row.stats_second_vibe_tag_id, row.stats_second_vibe_percent, row.stats_total_vibes);
+  addNearbyTopVibe(topVibes, row.stats_top_vibe_tag_id, row.stats_top_vibe_percent, row.stats_total_vibes, supportsV2);
+  addNearbyTopVibe(topVibes, row.stats_second_vibe_tag_id, row.stats_second_vibe_percent, row.stats_total_vibes, supportsV2);
   return topVibes;
 }
 
@@ -4705,18 +6564,27 @@ function addNearbyTopVibe(
   }>,
   tagID: VibeTagID | null,
   percentage: number | null,
-  totalVibes: number
+  totalVibes: number,
+  supportsV2: boolean
 ): void {
   if (!tagID || percentage === null || percentage <= 0) {
     return;
   }
 
-  const tag = TAG_BY_ID.get(tagID);
+  const compatibleTagID = clientCompatibleTagID(tagID, supportsV2);
+  const existing = output.find((item) => item.vibe_tag_id === compatibleTagID);
+  if (existing) {
+    existing.count += Math.max(1, Math.round((totalVibes * percentage) / 100));
+    existing.percentage = Math.min(100, existing.percentage + Math.round(percentage));
+    return;
+  }
+
+  const tag = TAG_BY_ID.get(compatibleTagID);
   output.push({
-    vibe_tag: legacyDisplayNameForTag(tagID),
-    vibe_tag_id: tagID,
-    slug: tag?.slug ?? tagID,
-    display_name: tag?.display_name ?? tagID,
+    vibe_tag: legacyDisplayNameForTag(compatibleTagID),
+    vibe_tag_id: compatibleTagID,
+    slug: tag?.slug ?? compatibleTagID,
+    display_name: tag?.display_name ?? compatibleTagID,
     emoji: tag?.emoji ?? null,
     sentiment_group: tag?.sentiment_group ?? "neutral",
     count: Math.max(1, Math.round((totalVibes * percentage) / 100)),
@@ -4812,12 +6680,33 @@ async function fetchTopVibes(
   placeID: string,
   totalVibes: number,
   limit: number,
-  preferredTopVibeID?: VibeTagID | null
+  preferredTopVibeID?: VibeTagID | null,
+  supportsV2 = false
 ) {
-  const rows = prioritizePreferredTopVibe(
-    await fetchTagCounts(env, placeID, undefined, Math.max(limit, VIBE_TAG_DEFINITIONS.length)),
-    preferredTopVibeID
-  ).slice(0, limit);
+  const rawRows = await fetchTagCounts(env, placeID, undefined, Math.max(limit, VIBE_TAG_DEFINITIONS.length));
+  const compatibleRowsByID = new Map<VibeTagID, TagCountRow>();
+  for (const row of rawRows) {
+    const compatibleTagID = clientCompatibleTagID(row.vibe_tag_id, supportsV2);
+    const existing = compatibleRowsByID.get(compatibleTagID);
+    if (existing) {
+      existing.tag_count += row.tag_count;
+      if (!existing.first_seen_at || (row.first_seen_at && row.first_seen_at < existing.first_seen_at)) {
+        existing.first_seen_at = row.first_seen_at;
+      }
+    } else {
+      compatibleRowsByID.set(compatibleTagID, { ...row, vibe_tag_id: compatibleTagID });
+    }
+  }
+  const compatibleRows = Array.from(compatibleRowsByID.values()).sort((left, right) => {
+    if (left.tag_count === right.tag_count) {
+      return (left.first_seen_at ?? "").localeCompare(right.first_seen_at ?? "");
+    }
+    return right.tag_count - left.tag_count;
+  });
+  const preferredCompatibleTagID = preferredTopVibeID
+    ? clientCompatibleTagID(preferredTopVibeID, supportsV2)
+    : null;
+  const rows = prioritizePreferredTopVibe(compatibleRows, preferredCompatibleTagID).slice(0, limit);
 
   return rows.map((row) => ({
     vibe_tag: legacyDisplayNameForTag(row.vibe_tag_id),
@@ -4901,7 +6790,8 @@ async function refreshPlaceVibeStats(env: Env, placeID: string, updatedAt: strin
          last_year_total_vibes = 0,
          last_year_top_vibe_tag_id = NULL,
          last_year_top_vibe_percent = NULL,
-         updated_at = excluded.updated_at`
+         updated_at = excluded.updated_at
+       WHERE excluded.updated_at >= place_vibe_stats.updated_at`
     )
       .bind(placeID, updatedAt)
       .run();
@@ -4954,7 +6844,8 @@ async function refreshPlaceVibeStats(env: Env, placeID: string, updatedAt: strin
        last_year_total_vibes = excluded.last_year_total_vibes,
        last_year_top_vibe_tag_id = excluded.last_year_top_vibe_tag_id,
        last_year_top_vibe_percent = excluded.last_year_top_vibe_percent,
-       updated_at = excluded.updated_at`
+       updated_at = excluded.updated_at
+     WHERE excluded.updated_at >= place_vibe_stats.updated_at`
   )
     .bind(
       placeID,
@@ -4974,6 +6865,82 @@ async function refreshPlaceVibeStats(env: Env, placeID: string, updatedAt: strin
     .run();
 }
 
+async function refreshImmediatePlaceVibeStats(env: Env, placeID: string, updatedAt: string): Promise<void> {
+  const [totalResult, primaryResult, selectedResult] = await env.DB.batch([
+    env.DB.prepare(
+      `SELECT COUNT(*) AS total_vibes
+       FROM vibe_events
+       WHERE place_id = ? AND ${ACTIVE_EVENT_WHERE}`
+    ).bind(placeID),
+    env.DB.prepare(
+      `SELECT primary_vibe_tag_id AS vibe_tag_id, COUNT(*) AS tag_count, MIN(created_at) AS first_seen_at
+       FROM vibe_events
+       WHERE place_id = ? AND ${ACTIVE_EVENT_WHERE}
+       GROUP BY primary_vibe_tag_id
+       ORDER BY tag_count DESC, first_seen_at ASC, primary_vibe_tag_id ASC
+       LIMIT ?`
+    ).bind(placeID, VIBE_TAG_DEFINITIONS.length),
+    env.DB.prepare(
+      `SELECT vibe_tag_id, SUM(tag_count) AS tag_count, MIN(first_seen_at) AS first_seen_at
+       FROM (
+         SELECT primary_vibe_tag_id AS vibe_tag_id, COUNT(*) AS tag_count, MIN(created_at) AS first_seen_at
+         FROM vibe_events
+         WHERE place_id = ? AND ${ACTIVE_EVENT_WHERE}
+         GROUP BY primary_vibe_tag_id
+         UNION ALL
+         SELECT secondary_vibe_tag_id AS vibe_tag_id, COUNT(*) AS tag_count, MIN(created_at) AS first_seen_at
+         FROM vibe_events
+         WHERE place_id = ? AND ${ACTIVE_EVENT_WHERE} AND secondary_vibe_tag_id IS NOT NULL
+         GROUP BY secondary_vibe_tag_id
+         UNION ALL
+         SELECT third_vibe_tag_id AS vibe_tag_id, COUNT(*) AS tag_count, MIN(created_at) AS first_seen_at
+         FROM vibe_events
+         WHERE place_id = ? AND ${ACTIVE_EVENT_WHERE} AND third_vibe_tag_id IS NOT NULL
+         GROUP BY third_vibe_tag_id
+       )
+       GROUP BY vibe_tag_id
+       ORDER BY tag_count DESC, first_seen_at ASC, vibe_tag_id ASC
+       LIMIT ?`
+    ).bind(placeID, placeID, placeID, VIBE_TAG_DEFINITIONS.length),
+  ]);
+
+  const total = Number((totalResult.results?.[0] as EventTotalRow | undefined)?.total_vibes ?? 0);
+  const primaryRows = (primaryResult.results ?? []).filter(
+    (row): row is TagCountRow => Boolean(TAG_BY_ID.get((row as TagCountRow).vibe_tag_id))
+  );
+  const selectedRows = (selectedResult.results ?? []).filter(
+    (row): row is TagCountRow => Boolean(TAG_BY_ID.get((row as TagCountRow).vibe_tag_id))
+  );
+  const top = primaryRows[0] ?? selectedRows[0] ?? null;
+  const second = supportingTopTag(selectedRows, top?.vibe_tag_id);
+  const topSelectedCount = selectedTagCount(selectedRows, top?.vibe_tag_id) ?? top?.tag_count ?? null;
+
+  await env.DB.prepare(
+    `INSERT INTO place_vibe_stats (
+       place_id, total_vibes, top_vibe_tag_id, top_vibe_percent,
+       second_vibe_tag_id, second_vibe_percent, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(place_id) DO UPDATE SET
+       total_vibes = excluded.total_vibes,
+       top_vibe_tag_id = excluded.top_vibe_tag_id,
+       top_vibe_percent = excluded.top_vibe_percent,
+       second_vibe_tag_id = excluded.second_vibe_tag_id,
+       second_vibe_percent = excluded.second_vibe_percent,
+       updated_at = excluded.updated_at
+     WHERE excluded.updated_at >= place_vibe_stats.updated_at`
+  )
+    .bind(
+      placeID,
+      total,
+      top?.vibe_tag_id ?? null,
+      topSelectedCount !== null ? percent(topSelectedCount, total) : null,
+      second?.vibe_tag_id ?? null,
+      second ? percent(second.tag_count, total) : null,
+      updatedAt
+    )
+    .run();
+}
+
 async function refreshPlaceVibeTagStats(env: Env, placeID: string, updatedAt: string): Promise<void> {
   const nowMs = Date.now();
   const windows = [
@@ -4981,7 +6948,9 @@ async function refreshPlaceVibeTagStats(env: Env, placeID: string, updatedAt: st
     { id: "last_30_days", since: new Date(nowMs - 30 * 24 * 60 * 60 * 1000).toISOString() },
     { id: "last_365_days", since: new Date(nowMs - 365 * 24 * 60 * 60 * 1000).toISOString() },
   ] as const;
-  const statements = [env.DB.prepare("DELETE FROM place_vibe_tag_stats WHERE place_id = ?").bind(placeID)];
+  const statements = [
+    env.DB.prepare("DELETE FROM place_vibe_tag_stats WHERE place_id = ? AND updated_at <= ?").bind(placeID, updatedAt),
+  ];
 
   for (const statsWindow of windows) {
     const vibeEventCount = await fetchEventTotal(env, placeID, statsWindow.since);
@@ -5006,7 +6975,8 @@ async function refreshPlaceVibeTagStats(env: Env, placeID: string, updatedAt: st
              vibe_event_count = excluded.vibe_event_count,
              tag_count = excluded.tag_count,
              selected_by_vibe_percent = excluded.selected_by_vibe_percent,
-             updated_at = excluded.updated_at`
+             updated_at = excluded.updated_at
+             WHERE excluded.updated_at >= place_vibe_tag_stats.updated_at`
         ).bind(
           placeID,
           tagCount.vibe_tag_id,
@@ -5021,6 +6991,64 @@ async function refreshPlaceVibeTagStats(env: Env, placeID: string, updatedAt: st
   }
 
   await env.DB.batch(statements);
+}
+
+type AggregateRefreshJobRow = {
+  place_id: string;
+  requested_at: string;
+  attempts: number;
+};
+
+async function processAggregateRefreshJob(env: Env, placeID: string): Promise<void> {
+  const job = await env.DB.prepare(
+    `SELECT place_id, requested_at, attempts
+     FROM aggregate_refresh_jobs
+     WHERE place_id = ?`
+  )
+    .bind(placeID)
+    .first<AggregateRefreshJobRow>();
+  if (!job) {
+    return;
+  }
+
+  try {
+    await refreshPlaceVibeStats(env, placeID, job.requested_at);
+    await refreshPlaceVibeTagStats(env, placeID, job.requested_at);
+    await env.DB.prepare(
+      "DELETE FROM aggregate_refresh_jobs WHERE place_id = ? AND requested_at = ?"
+    )
+      .bind(placeID, job.requested_at)
+      .run();
+  } catch (error) {
+    const attempts = job.attempts + 1;
+    const retryDelaySeconds = Math.min(60 * 2 ** Math.min(attempts - 1, 5), 3600);
+    const nextAttemptAt = new Date(Date.now() + retryDelaySeconds * 1000).toISOString();
+    await env.DB.prepare(
+      `UPDATE aggregate_refresh_jobs
+       SET attempts = ?, next_attempt_at = ?, last_error = ?
+       WHERE place_id = ? AND requested_at = ?`
+    )
+      .bind(attempts, nextAttemptAt, String(error).slice(0, 500), placeID, job.requested_at)
+      .run();
+    console.error(JSON.stringify({ message: "Aggregate refresh failed", placeID, attempts, error: String(error) }));
+  }
+}
+
+async function drainAggregateRefreshJobs(env: Env, limit = 25): Promise<void> {
+  const now = new Date().toISOString();
+  const result = await env.DB.prepare(
+    `SELECT place_id, requested_at, attempts
+     FROM aggregate_refresh_jobs
+     WHERE next_attempt_at <= ?
+     ORDER BY requested_at ASC
+     LIMIT ?`
+  )
+    .bind(now, limit)
+    .all<AggregateRefreshJobRow>();
+
+  for (const job of result.results ?? []) {
+    await processAggregateRefreshJob(env, job.place_id);
+  }
 }
 
 async function fetchEventTotal(env: Env, placeID: string, since?: string): Promise<number> {
@@ -5128,17 +7156,22 @@ async function mirrorLegacyRating(
     .run();
 }
 
-function serializeVibeEvent(row: VibeEventRow) {
+function serializeVibeEvent(row: VibeEventRow, supportsV2 = false) {
+  const primaryTagID = clientCompatibleTagID(row.primary_vibe_tag_id, supportsV2);
+  const secondaryTagID = row.secondary_vibe_tag_id
+    ? clientCompatibleTagID(row.secondary_vibe_tag_id, supportsV2)
+    : null;
+  const thirdTagID = row.third_vibe_tag_id
+    ? clientCompatibleTagID(row.third_vibe_tag_id, supportsV2)
+    : null;
   return {
     id: row.id,
     place_id: row.place_id,
     anonymous_user_id: row.anonymous_user_id,
-    primary_vibe_tag_id: row.primary_vibe_tag_id,
-    secondary_vibe_tag_id: row.secondary_vibe_tag_id,
-    third_vibe_tag_id: row.third_vibe_tag_id,
-    vibe_tag_ids: [row.primary_vibe_tag_id, row.secondary_vibe_tag_id, row.third_vibe_tag_id].filter((tag): tag is VibeTagID =>
-      Boolean(tag)
-    ),
+    primary_vibe_tag_id: primaryTagID,
+    secondary_vibe_tag_id: secondaryTagID,
+    third_vibe_tag_id: thirdTagID,
+    vibe_tag_ids: [...new Set([primaryTagID, secondaryTagID, thirdTagID].filter((tag): tag is VibeTagID => Boolean(tag)))],
     source: row.source,
     app_version: row.app_version,
     taxonomy_version_id: row.taxonomy_version_id ?? CURRENT_TAXONOMY_VERSION_ID,
@@ -5149,15 +7182,22 @@ function serializeVibeEvent(row: VibeEventRow) {
   };
 }
 
-function serializeLegacyRating(row: VibeEventRow) {
-  const primaryName = legacyDisplayNameForTag(row.primary_vibe_tag_id);
-  const secondaryName = row.secondary_vibe_tag_id ? legacyDisplayNameForTag(row.secondary_vibe_tag_id) : null;
-  const thirdName = row.third_vibe_tag_id ? legacyDisplayNameForTag(row.third_vibe_tag_id) : null;
+function serializeLegacyRating(row: VibeEventRow, supportsV2 = false) {
+  const primaryTagID = clientCompatibleTagID(row.primary_vibe_tag_id, supportsV2);
+  const secondaryTagID = row.secondary_vibe_tag_id
+    ? clientCompatibleTagID(row.secondary_vibe_tag_id, supportsV2)
+    : null;
+  const thirdTagID = row.third_vibe_tag_id
+    ? clientCompatibleTagID(row.third_vibe_tag_id, supportsV2)
+    : null;
+  const primaryName = legacyDisplayNameForTag(primaryTagID);
+  const secondaryName = secondaryTagID ? legacyDisplayNameForTag(secondaryTagID) : null;
+  const thirdName = thirdTagID ? legacyDisplayNameForTag(thirdTagID) : null;
   const vibeTags = [primaryName, secondaryName, thirdName].filter((tag): tag is string => Boolean(tag));
   const scoreTotal = [
-    scoreForTag(row.primary_vibe_tag_id),
-    row.secondary_vibe_tag_id ? scoreForTag(row.secondary_vibe_tag_id) : null,
-    row.third_vibe_tag_id ? scoreForTag(row.third_vibe_tag_id) : null,
+    scoreForTag(primaryTagID),
+    secondaryTagID ? scoreForTag(secondaryTagID) : null,
+    thirdTagID ? scoreForTag(thirdTagID) : null,
   ].filter((score): score is number => score !== null);
 
   return {
@@ -5355,6 +7395,12 @@ function normalizeVibeTagID(value: string | null): VibeTagID | null {
       return "hidden_gem";
     case "underrated":
       return "underrated";
+    case "bougie":
+      return "bougie";
+    case "low_key":
+    case "worth_it":
+    case "worthit":
+      return "low_key";
     case "mid":
       return "mid";
     case "chaos":
@@ -5391,6 +7437,10 @@ function legacyDisplayNameForTag(tagID: VibeTagID): string {
       return "Hidden Gem";
     case "underrated":
       return "Underrated";
+    case "bougie":
+      return "Bougie";
+    case "low_key":
+      return "Low-key";
     case "mid":
       return "Mid";
     case "chaos":
@@ -5420,6 +7470,10 @@ function scoreForTag(tagID: VibeTagID): number {
       return 6.5;
     case "underrated":
       return 6;
+    case "bougie":
+      return 5.8;
+    case "low_key":
+      return 5.6;
     case "mid":
       return 5;
     case "chaos":
@@ -5598,20 +7652,96 @@ function timingSafeStringEqual(a: string | null, b: string | null): boolean {
   return diff === 0;
 }
 
-function rateLimitDecision(request: Request): { allowed: boolean; key: string } {
-  const key = request.headers.get("CF-Connecting-IP") ?? "local";
-  return { allowed: true, key };
+type RateLimitDecision = {
+  allowed: boolean;
+  policy: string;
+};
+
+async function applyRateLimit(
+  binding: RateLimit | undefined,
+  key: string,
+  policy: string
+): Promise<RateLimitDecision> {
+  if (!binding) {
+    console.error(JSON.stringify({ message: "Rate limiter binding unavailable", policy }));
+    return { allowed: true, policy: `${policy}; unavailable` };
+  }
+
+  try {
+    const outcome = await binding.limit({ key });
+    return { allowed: outcome.success, policy };
+  } catch (error) {
+    // A binding outage should not turn into an application-wide outage. The
+    // missing protection is observable and the configured binding remains the
+    // normal production path.
+    console.error(JSON.stringify({ message: "Rate limiter failed", policy, error: String(error) }));
+    return { allowed: true, policy: `${policy}; fail-open` };
+  }
+}
+
+async function rateLimitDecision(request: Request, path: string, env: Env): Promise<RateLimitDecision> {
+  if (request.method === "OPTIONS" || request.method === "HEAD") {
+    return { allowed: true, policy: "none" };
+  }
+
+  const runtimeEnv = env as RuntimeEnv;
+  const ip = cleanString(request.headers.get("CF-Connecting-IP"))?.slice(0, 128) ?? "local";
+  const device = cleanString(request.headers.get("X-Vibe-Device-ID-Hash"))?.slice(0, 128);
+  const authPaths = new Set([
+    "/account/signup",
+    "/account/login",
+    "/account/recovery",
+    "/account/review-login",
+  ]);
+
+  if (request.method === "POST" && authPaths.has(path)) {
+    return applyRateLimit(runtimeEnv.AUTH_RATE_LIMITER, `auth:${ip}`, "auth=6;w=60");
+  }
+
+  if (request.method === "POST" && path === "/analytics/events") {
+    const deviceDecision = await applyRateLimit(
+      runtimeEnv.ANALYTICS_DEVICE_RATE_LIMITER,
+      `analytics-device:${device ?? ip}`,
+      "analytics-device=120;w=60"
+    );
+    if (!deviceDecision.allowed) {
+      return deviceDecision;
+    }
+    return applyRateLimit(runtimeEnv.ANALYTICS_IP_RATE_LIMITER, `analytics-ip:${ip}`, "analytics-ip=600;w=60");
+  }
+
+  if (request.method === "GET" && (path === "/places/provider-search" || path === "/places/search")) {
+    return applyRateLimit(
+      runtimeEnv.SEARCH_RATE_LIMITER,
+      `search:${device ?? ip}`,
+      "place-search=60;w=60"
+    );
+  }
+
+  if (request.method === "POST") {
+    const deviceDecision = await applyRateLimit(
+      runtimeEnv.WRITE_DEVICE_RATE_LIMITER,
+      `write-device:${device ?? ip}`,
+      "write-device=30;w=60"
+    );
+    if (!deviceDecision.allowed) {
+      return deviceDecision;
+    }
+    return applyRateLimit(runtimeEnv.WRITE_IP_RATE_LIMITER, `write-ip:${ip}`, "write-ip=120;w=60");
+  }
+
+  return { allowed: true, policy: "none" };
 }
 
 function corsHeaders(): Headers {
   const headers = new Headers();
   headers.set("Access-Control-Allow-Origin", "*");
-  headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  headers.set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   headers.set(
     "Access-Control-Allow-Headers",
-    `Content-Type, Authorization, X-Vibe-Device-ID-Hash, X-Vibe-App-Version, X-Vibe-Source, ${BETA_ACCESS_HEADER}`
+    `Content-Type, Authorization, X-Vibe-Device-ID-Hash, X-Vibe-App-Version, X-Vibe-Source, ${TAXONOMY_VERSION_HEADER}, ${BETA_ACCESS_HEADER}`
   );
-  headers.set("X-RateLimit-Policy", "placeholder");
+  headers.set("X-RateLimit-Policy", "route-specific Cloudflare binding");
   return headers;
 }
 

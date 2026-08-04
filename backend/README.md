@@ -47,6 +47,8 @@ Active V1 tags are seeded in `vibe_tags`:
 | `iconic` | Iconic | identity |
 | `hidden_gem` | Hidden Gem | positive |
 | `underrated` | Underrated | positive |
+| `bougie` | Bougie | identity |
+| `low_key` | Low-key | identity |
 | `mid` | Mid | neutral |
 | `chaos` | Chaos | neutral |
 | `overrated` | Overrated | negative |
@@ -55,7 +57,7 @@ Active V1 tags are seeded in `vibe_tags`:
 | `emotionally_damaging` | Emotionally Damaging | negative |
 
 The Worker accepts tag ids, slugs, display names, and known legacy labels from earlier prototypes.
-Legacy labels are normalized into the canonical tag ids before storage.
+Legacy labels are normalized into the canonical tag ids before storage. `Worth It`, `Worth it`, and `worth_it` are accepted as aliases for `low_key`.
 Examples: `Inspiring` maps to `changed_my_life`; `Elite`, `Great`, `Unreasonably good`, and `Surprisingly solid` map to `fire`; `Certified` and `America` map to `iconic`; `Cringe`, `UnAmerican`, and `Never again` map to `emotionally_damaging`.
 
 ## Why Raw Events Are Separate From Aggregate Stats
@@ -225,3 +227,16 @@ The dashboard currently tracks:
 - D1 and D7 retention
 - app version mix
 - admin-only device labels, with the default view excluding devices marked `excluded_from_core_metrics`
+
+# Launch-Critical Write Path
+
+Vibe submissions commit the canonical `vibe_events` row and an
+`aggregate_refresh_jobs` row in one atomic D1 batch. The all-time place total
+and display vibes are refreshed before the response so other users see the
+change immediately. Heavier rolling-window and per-tag rollups run through
+`waitUntil()` and are retried by the minute cron from the durable job table.
+
+Route-specific Cloudflare rate-limit bindings protect authentication, provider
+search, analytics ingestion, and writes. Run `npm run check` before deployment
+to typecheck the Worker and tests, execute the isolated D1 regression suite,
+and validate the production Worker bundle with a Wrangler dry run.

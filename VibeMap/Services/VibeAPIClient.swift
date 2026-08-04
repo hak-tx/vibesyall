@@ -7,10 +7,12 @@ protocol ProviderPlaceSearching {
 protocol VibeServicing: ProviderPlaceSearching {
     func fetchVibes() async throws -> [VibeTag]
     func fetchNearby(latitude: Double, longitude: Double, radius: Double, vibeFilter: VibeTag?, deviceIdHash: String?) async throws -> [VibePlace]
+    func searchSavedPlaces(query: String, latitude: Double?, longitude: Double?, limit: Int, deviceIdHash: String?) async throws -> [VibePlace]
     func fetchMapCells(latitude: Double, longitude: Double, radius: Double, cellSize: Double, vibeFilter: VibeTag?) async throws -> [MapCellCluster]
     func fetchPlace(id: String, deviceIdHash: String?) async throws -> VibePlace
     func upsertPlace(_ candidate: PlaceCandidate) async throws -> VibePlace
     func submitRating(placeId: String, deviceIdHash: String, vibeTags: [VibeTag]) async throws -> RatingSubmission
+    func deleteRating(placeId: String, deviceIdHash: String) async throws -> VibePlace
     func fetchAccountEligibility(deviceIdHash: String) async throws -> AccountEligibility
     func requestAccountSignup(email: String, deviceIdHash: String) async throws -> AccountSignupResponse
     func requestAccountLogin(email: String) async throws -> AccountLoginResponse
@@ -25,6 +27,7 @@ struct VibeAPIClient: VibeServicing {
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
     private let accountSessionTokenKey = "vibes-yall.account-session-token"
+    private let taxonomyVersion = "vibes_v3"
 
     init(baseURL: URL, session: URLSession = .shared) {
         self.baseURL = baseURL
@@ -56,6 +59,32 @@ struct VibeAPIClient: VibeServicing {
         ]
         if let vibeFilter {
             queryItems.append(URLQueryItem(name: "vibe_tag", value: vibeFilter.rawValue))
+        }
+        components?.queryItems = queryItems
+
+        guard let url = components?.url else {
+            throw APIError.invalidURL
+        }
+
+        let response: NearbyPlacesResponse = try await get(url: url, deviceIdHash: deviceIdHash)
+        return response.places
+    }
+
+    func searchSavedPlaces(
+        query: String,
+        latitude: Double?,
+        longitude: Double?,
+        limit: Int,
+        deviceIdHash: String?
+    ) async throws -> [VibePlace] {
+        var components = URLComponents(url: baseURL.appendingPathComponent("places/search"), resolvingAgainstBaseURL: false)
+        var queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+        if let latitude, let longitude {
+            queryItems.append(URLQueryItem(name: "lat", value: String(format: "%.5f", latitude)))
+            queryItems.append(URLQueryItem(name: "lng", value: String(format: "%.5f", longitude)))
         }
         components?.queryItems = queryItems
 
@@ -142,6 +171,16 @@ struct VibeAPIClient: VibeServicing {
         return RatingSubmission(place: response.place, rating: response.rating, discovery: response.discovery)
     }
 
+    func deleteRating(placeId: String, deviceIdHash: String) async throws -> VibePlace {
+        let response: RatingDeletionResponse = try await send(
+            path: "ratings/\(placeId)",
+            method: "DELETE",
+            body: EmptyRequest(),
+            deviceIdHash: deviceIdHash
+        )
+        return response.place
+    }
+
     func fetchAccountEligibility(deviceIdHash: String) async throws -> AccountEligibility {
         let response: AccountEligibilityResponse = try await get(path: "account/eligibility", deviceIdHash: deviceIdHash)
         return response.account
@@ -190,7 +229,14 @@ struct VibeAPIClient: VibeServicing {
     }
 
     private func get<Response: Decodable>(url: URL, deviceIdHash: String? = nil) async throws -> Response {
-        var request = URLRequest(url: url)
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        var queryItems = components?.queryItems ?? []
+        if !queryItems.contains(where: { $0.name == "taxonomy_version" }) {
+            queryItems.append(URLQueryItem(name: "taxonomy_version", value: taxonomyVersion))
+        }
+        components?.queryItems = queryItems
+
+        var request = URLRequest(url: components?.url ?? url)
         request.httpMethod = "GET"
         applyStandardHeaders(to: &request, deviceIdHash: deviceIdHash)
         return try await perform(request)
@@ -230,6 +276,7 @@ struct VibeAPIClient: VibeServicing {
         }
 
         request.addValue("ios", forHTTPHeaderField: "X-Vibe-Source")
+        request.addValue(taxonomyVersion, forHTTPHeaderField: "X-Vibe-Taxonomy-Version")
     }
 
     private func perform<Response: Decodable>(_ request: URLRequest) async throws -> Response {
@@ -283,6 +330,13 @@ private struct RatingResponse: Decodable {
     var discovery: RatingDiscovery?
 }
 
+private struct RatingDeletionResponse: Decodable {
+    var deleted: Bool
+    var place: VibePlace
+}
+
+private struct EmptyRequest: Encodable {}
+
 private struct AnalyticsEventRequest: Encodable {
     var eventName: String
     var platform: String
@@ -305,11 +359,11 @@ enum APIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidURL:
-            "The backend URL is not valid."
+            L10n.string("The backend URL is not valid.")
         case .invalidResponse:
-            "The backend did not return a usable response."
+            L10n.string("The backend did not return a usable response.")
         case .server(let message):
-            message
+            L10n.serverMessage(message)
         }
     }
 }

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct VibeMapView: View {
     @ObservedObject var viewModel: VibeMapViewModel
+    @EnvironmentObject private var languageStore: AppLanguageStore
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedMapFeature: MapFeature?
@@ -33,10 +34,6 @@ struct VibeMapView: View {
         ZStack(alignment: .bottom) {
             ZStack(alignment: .top) {
                 Map(position: $position, selection: $selectedMapFeature) {
-                    UserAnnotation(anchor: .center) {
-                        UserLocationMarker()
-                    }
-
                     ForEach(renderedMapContent.places) { place in
                         Annotation(place.name, coordinate: place.coordinate) {
                             PlaceMapMarker(
@@ -84,6 +81,11 @@ struct VibeMapView: View {
                                     viewModel.openRating(for: selectedPlace)
                                 }
                         }
+                    }
+
+                    UserAnnotation(anchor: .center) {
+                        UserLocationMarker()
+                            .allowsHitTesting(false)
                     }
                 }
                 .mapStyle(mapDisplayStyle.style)
@@ -162,6 +164,7 @@ struct VibeMapView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .id(languageStore.language)
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .animation(.easeInOut(duration: 0.18), value: isSearchFocused)
         .onReceive(viewModel.locationService.$lastKnownCoordinate.compactMap { $0 }) { coordinate in
@@ -178,7 +181,7 @@ struct VibeMapView: View {
             viewModel.closeRatingFlow()
         }) { draft in
             RatingSheetView(viewModel: viewModel, draft: draft)
-                .presentationDragIndicator(.hidden)
+                .presentationDragIndicator(.visible)
                 .presentationCornerRadius(30)
                 .preferredColorScheme(.light)
                 .environment(\.colorScheme, .light)
@@ -215,7 +218,7 @@ struct VibeMapView: View {
                     }
                 }
             )
-            .presentationDetents([.height(500)])
+            .presentationDetents([.height(570)])
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(28)
             .preferredColorScheme(.light)
@@ -240,7 +243,7 @@ struct VibeMapView: View {
             Alert(
                 title: Text(alert.title),
                 message: Text(alert.message),
-                dismissButton: .default(Text("OK"))
+                dismissButton: .default(Text(L10n.string("OK")))
             )
         }
         .task {
@@ -518,7 +521,7 @@ private struct MapStyleFloatingButton: View {
                 .shadow(color: .black.opacity(0.16), radius: 10, y: 5)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Map style")
+        .accessibilityLabel(L10n.string("Map style"))
     }
 }
 
@@ -538,7 +541,7 @@ private struct UserLocationMarker: View {
                 }
                 .shadow(color: .black.opacity(0.22), radius: 5, y: 2)
         }
-        .accessibilityLabel("My location")
+        .accessibilityLabel(L10n.string("My location"))
     }
 }
 
@@ -556,8 +559,7 @@ private struct PlaceMapMarker: View {
                 .fill(markerFillColor)
                 .frame(width: isSelected ? 24 : 20, height: isSelected ? 24 : 20)
 
-            Image(systemName: markerSymbol)
-                .font(.system(size: isSelected ? 12 : 10, weight: .black))
+            markerIcon
                 .foregroundStyle(markerIconColor)
 
             if isSelected {
@@ -570,11 +572,14 @@ private struct PlaceMapMarker: View {
         .accessibilityLabel(place.name)
     }
 
-    private var markerSymbol: String {
-        guard let topVibeTag = place.stats?.topVibeTag, place.hasRatings else {
-            return "mappin.circle.fill"
+    @ViewBuilder
+    private var markerIcon: some View {
+        if let topVibeTag = place.stats?.topVibeTag, place.hasRatings {
+            VibeIconImage(tag: topVibeTag, size: isSelected ? 12 : 10)
+        } else {
+            Image(systemName: "mappin.circle.fill")
+                .font(.system(size: isSelected ? 12 : 10, weight: .black))
         }
-        return topVibeTag.visualStyle.symbolName
     }
 
     private var markerColor: Color {
@@ -625,8 +630,6 @@ private struct VibeClusterIconMarker: View {
 
     var body: some View {
         let color = vibe?.visualStyle.color ?? VibeDesign.primary
-        let symbolName = vibe?.visualStyle.symbolName ?? "circle.grid.2x2.fill"
-
         ZStack(alignment: .bottomTrailing) {
             ZStack {
                 Circle()
@@ -645,8 +648,7 @@ private struct VibeClusterIconMarker: View {
                     .fill(color.opacity(0.96))
                     .frame(width: innerSize, height: innerSize)
 
-                Image(systemName: symbolName)
-                    .font(.system(size: iconSize, weight: .black))
+                clusterIcon
                     .foregroundStyle(.white)
             }
             .frame(width: markerFrameSize, height: markerFrameSize)
@@ -659,6 +661,16 @@ private struct VibeClusterIconMarker: View {
         .frame(width: markerFrameSize + countBadgeWidthOffset, height: markerFrameSize + countBadgeWidthOffset)
         .shadow(color: color.opacity(0.20), radius: 5, y: 2)
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    @ViewBuilder
+    private var clusterIcon: some View {
+        if let vibe {
+            VibeIconImage(tag: vibe, size: iconSize)
+        } else {
+            Image(systemName: "circle.grid.2x2.fill")
+                .font(.system(size: iconSize, weight: .black))
+        }
     }
 
     private var countBadge: some View {
@@ -791,9 +803,9 @@ private struct VibeClusterIconMarker: View {
     }
 
     private var accessibilityLabel: String {
-        let placeLabel = count == 1 ? "1 nearby place" : "\(count) nearby places"
+        let placeLabel = L10n.count(count, singular: "%d nearby place", plural: "%d nearby places")
         if let vibe {
-            return "\(placeLabel), mostly \(vibe.rawValue)"
+            return L10n.format("%@, mostly %@", placeLabel, vibe.displayName)
         }
         return placeLabel
     }
@@ -942,7 +954,7 @@ private struct CurrentLocationButton: View {
                 .shadow(color: .black.opacity(0.18), radius: 12, y: 5)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Near me")
+        .accessibilityLabel(L10n.string("Near me"))
     }
 }
 
@@ -959,4 +971,5 @@ private struct CurrentLocationButton: View {
             identityService: DeviceIdentityService()
         )
     )
+    .environmentObject(AppLanguageStore())
 }

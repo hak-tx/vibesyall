@@ -4,6 +4,28 @@ import SwiftUI
 struct VibeVisualStyle {
     var color: Color
     var symbolName: String
+    var assetName: String? = nil
+}
+
+struct VibeIconImage: View {
+    let tag: VibeTag
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let assetName = tag.visualStyle.assetName {
+                Image(assetName)
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: size * 1.25, height: size)
+            } else {
+                Image(systemName: tag.visualStyle.symbolName)
+                    .font(.system(size: size, weight: .black))
+            }
+        }
+        .accessibilityHidden(true)
+    }
 }
 
 enum VibeTag: String, CaseIterable, Codable, Identifiable, Hashable {
@@ -13,6 +35,8 @@ enum VibeTag: String, CaseIterable, Codable, Identifiable, Hashable {
     case iconic = "Iconic"
     case hiddenGem = "Hidden Gem"
     case underrated = "Underrated"
+    case bougie = "Bougie"
+    case lowKey = "Low-key"
     case mid = "Mid"
     case chaos = "Chaos"
     case overrated = "Overrated"
@@ -21,6 +45,10 @@ enum VibeTag: String, CaseIterable, Codable, Identifiable, Hashable {
     case emotionallyDamaging = "Emotionally Damaging"
 
     var id: String { rawValue }
+
+    var displayName: String {
+        L10n.string(rawValue)
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -56,6 +84,10 @@ enum VibeTag: String, CaseIterable, Codable, Identifiable, Hashable {
             6.5
         case .underrated:
             6
+        case .bougie:
+            5.8
+        case .lowKey:
+            5.6
         case .mid:
             5
         case .chaos:
@@ -72,7 +104,7 @@ enum VibeTag: String, CaseIterable, Codable, Identifiable, Hashable {
     }
 
     var mapLabel: String {
-        switch self {
+        let englishLabel = switch self {
         case .changedMyLife:
             "Life"
         case .fire:
@@ -89,6 +121,10 @@ enum VibeTag: String, CaseIterable, Codable, Identifiable, Hashable {
             "Gem"
         case .underrated:
             "Under"
+        case .bougie:
+            "Bougie"
+        case .lowKey:
+            "Low-key"
         case .touristTrap:
             "Trap"
         case .mid:
@@ -98,6 +134,7 @@ enum VibeTag: String, CaseIterable, Codable, Identifiable, Hashable {
         case .needsPrayer:
             "Prayer"
         }
+        return L10n.string(englishLabel)
     }
 
     var visualStyle: VibeVisualStyle {
@@ -118,6 +155,10 @@ enum VibeTag: String, CaseIterable, Codable, Identifiable, Hashable {
             VibeVisualStyle(color: Color(red: 0.06, green: 0.53, blue: 0.42), symbolName: "diamond.fill")
         case .underrated:
             VibeVisualStyle(color: Color(red: 0.19, green: 0.48, blue: 0.86), symbolName: "arrow.up.forward.circle.fill")
+        case .bougie:
+            VibeVisualStyle(color: Color(red: 0.50, green: 0.27, blue: 0.76), symbolName: "crown.fill")
+        case .lowKey:
+            VibeVisualStyle(color: Color(red: 0.18, green: 0.58, blue: 0.31), symbolName: "leaf.fill")
         case .touristTrap:
             VibeVisualStyle(color: Color(red: 0.86, green: 0.58, blue: 0.05), symbolName: "camera.fill")
         case .mid:
@@ -125,7 +166,11 @@ enum VibeTag: String, CaseIterable, Codable, Identifiable, Hashable {
         case .chaos:
             VibeVisualStyle(color: Color(red: 0.72, green: 0.18, blue: 0.18), symbolName: "tornado")
         case .needsPrayer:
-            VibeVisualStyle(color: Color(red: 0.28, green: 0.31, blue: 0.80), symbolName: "hands.sparkles.fill")
+            VibeVisualStyle(
+                color: Color(red: 0.28, green: 0.31, blue: 0.80),
+                symbolName: "hands.sparkles.fill",
+                assetName: "NeedsPrayerIcon"
+            )
         }
     }
 
@@ -133,7 +178,7 @@ enum VibeTag: String, CaseIterable, Codable, Identifiable, Hashable {
         switch self {
         case .changedMyLife, .fire, .worthTheDrive, .iconic:
             .loveIt
-        case .hiddenGem, .underrated, .mid, .chaos:
+        case .hiddenGem, .underrated, .bougie, .lowKey, .mid, .chaos:
             .its
         case .overrated, .touristTrap, .needsPrayer, .emotionallyDamaging:
             .skipIt
@@ -180,6 +225,10 @@ enum VibeTag: String, CaseIterable, Codable, Identifiable, Hashable {
             return .hiddenGem
         case "Underrated", "underrated":
             return .underrated
+        case "Bougie", "bougie":
+            return .bougie
+        case "Low-key", "Low Key", "low-key", "low_key", "Worth It", "Worth it", "worth_it":
+            return .lowKey
         case "Mid", "mid":
             return .mid
         case "Chaos", "chaos":
@@ -204,6 +253,10 @@ enum VibeGuidanceGroup: String, CaseIterable, Identifiable {
     case skipIt = "Skip it"
 
     var id: String { rawValue }
+
+    var displayName: String {
+        L10n.string(rawValue)
+    }
 
     var icon: String {
         switch self {

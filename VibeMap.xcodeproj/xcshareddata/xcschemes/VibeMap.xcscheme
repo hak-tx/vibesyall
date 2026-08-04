@@ -39,7 +39,20 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "110C53C59B1C27BCA9AD6117"
+               BuildableName = "VibeMapTests.xctest"
+               BlueprintName = "VibeMapTests"
+               ReferencedContainer = "container:VibeMap.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"

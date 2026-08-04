@@ -300,6 +300,15 @@ CREATE TABLE IF NOT EXISTS discovery_events (
   FOREIGN KEY(place_id) REFERENCES places(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS aggregate_refresh_jobs (
+  place_id TEXT PRIMARY KEY,
+  requested_at TEXT NOT NULL,
+  next_attempt_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  FOREIGN KEY(place_id) REFERENCES places(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_places_provider_place_id ON places(provider, provider_place_id);
 CREATE INDEX IF NOT EXISTS idx_places_lat_lng ON places(latitude, longitude);
 CREATE INDEX IF NOT EXISTS idx_places_lng_lat ON places(longitude, latitude);
@@ -343,6 +352,7 @@ CREATE INDEX IF NOT EXISTS idx_ratings_place_vibe_secondary ON ratings(place_id,
 CREATE INDEX IF NOT EXISTS idx_place_stats_rating_count ON place_stats(rating_count);
 CREATE INDEX IF NOT EXISTS idx_place_vibe_counts_tag_count ON place_vibe_counts(vibe_tag, rating_count DESC, place_id);
 CREATE INDEX IF NOT EXISTS idx_discovery_events_place_type ON discovery_events(place_id, event_type);
+CREATE INDEX IF NOT EXISTS idx_aggregate_refresh_jobs_due ON aggregate_refresh_jobs(next_attempt_at, requested_at);
 
 INSERT INTO vibe_tags (id, slug, display_name, emoji, sentiment_group, sort_order, is_active) VALUES
   ('changed_my_life', 'changed_my_life', 'Changed my Life', '⭐', 'positive', 10, 1),
@@ -351,12 +361,14 @@ INSERT INTO vibe_tags (id, slug, display_name, emoji, sentiment_group, sort_orde
   ('iconic', 'iconic', 'Iconic', '🌟', 'identity', 40, 1),
   ('hidden_gem', 'hidden_gem', 'Hidden Gem', '💎', 'positive', 50, 1),
   ('underrated', 'underrated', 'Underrated', '📈', 'positive', 60, 1),
-  ('mid', 'mid', 'Mid', '😐', 'neutral', 70, 1),
-  ('chaos', 'chaos', 'Chaos', '🌪', 'neutral', 80, 1),
-  ('overrated', 'overrated', 'Overrated', '👎', 'negative', 90, 1),
-  ('tourist_trap', 'tourist_trap', 'Tourist Trap', '📸', 'negative', 100, 1),
-  ('needs_prayer', 'needs_prayer', 'Needs Prayer', '🙏', 'negative', 110, 1),
-  ('emotionally_damaging', 'emotionally_damaging', 'Emotionally Damaging', '💀', 'negative', 120, 1)
+  ('bougie', 'bougie', 'Bougie', '👑', 'identity', 70, 1),
+  ('low_key', 'low_key', 'Low-key', '🌿', 'identity', 80, 1),
+  ('mid', 'mid', 'Mid', '😐', 'neutral', 90, 1),
+  ('chaos', 'chaos', 'Chaos', '🌪', 'neutral', 100, 1),
+  ('overrated', 'overrated', 'Overrated', '👎', 'negative', 110, 1),
+  ('tourist_trap', 'tourist_trap', 'Tourist Trap', '📸', 'negative', 120, 1),
+  ('needs_prayer', 'needs_prayer', 'Needs Prayer', '🙏', 'negative', 130, 1),
+  ('emotionally_damaging', 'emotionally_damaging', 'Emotionally Damaging', '💀', 'negative', 140, 1)
 ON CONFLICT(id) DO UPDATE SET
   slug = excluded.slug,
   display_name = excluded.display_name,
@@ -367,6 +379,20 @@ ON CONFLICT(id) DO UPDATE SET
 
 INSERT INTO taxonomy_versions (id, label, effective_at, notes, created_at) VALUES
   ('vibes_v1', 'VIBES Y''ALL V1 tag set', '2026-06-28T00:00:00.000Z', 'Initial structured one-to-three vibe label taxonomy.', '2026-06-28T00:00:00.000Z')
+ON CONFLICT(id) DO UPDATE SET
+  label = excluded.label,
+  effective_at = excluded.effective_at,
+  notes = excluded.notes;
+
+INSERT INTO taxonomy_versions (id, label, effective_at, notes, created_at) VALUES
+  ('vibes_v2', 'VIBES Y''ALL V2 tag set', '2026-07-09T00:00:00.000Z', 'Adds Bougie and Worth It while preserving one-to-three ordered vibe labels.', '2026-07-09T00:00:00.000Z')
+ON CONFLICT(id) DO UPDATE SET
+  label = excluded.label,
+  effective_at = excluded.effective_at,
+  notes = excluded.notes;
+
+INSERT INTO taxonomy_versions (id, label, effective_at, notes, created_at) VALUES
+  ('vibes_v3', 'VIBES Y''ALL V3 tag set', '2026-07-25T00:00:00.000Z', 'Replaces Worth It with the canonical Low-key tag while preserving legacy input compatibility.', '2026-07-25T00:00:00.000Z')
 ON CONFLICT(id) DO UPDATE SET
   label = excluded.label,
   effective_at = excluded.effective_at,

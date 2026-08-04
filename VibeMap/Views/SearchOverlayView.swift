@@ -17,7 +17,7 @@ struct SearchOverlayView: View {
                         BrandMenuButtonLabel()
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Open VIBES Y'ALL menu")
+                    .accessibilityLabel(L10n.string("Open VIBES Y'ALL menu"))
                 }
 
                 vibeFilters(containerWidth: geometry.size.width)
@@ -34,7 +34,7 @@ struct SearchOverlayView: View {
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
-                Button("Done") {
+                Button(L10n.string("Done")) {
                     isFieldFocused = false
                     isSearchFocused = false
                 }
@@ -58,27 +58,38 @@ struct SearchOverlayView: View {
     }
 
     private func resultsPanel(maxHeight: CGFloat) -> some View {
-        let results = viewModel.filteredSearchResults
+        let primaryResults = viewModel.primarySearchResults
+        let relatedResults = viewModel.relatedSearchResults
 
         return VStack(spacing: 0) {
-            if !results.isEmpty {
+            if !primaryResults.isEmpty {
                 ScrollView(.vertical, showsIndicators: true) {
                     LazyVStack(spacing: 0) {
-                        ForEach(results) { result in
-                            Button {
-                                isFieldFocused = false
-                                isSearchFocused = false
-                                Task {
-                                    await viewModel.selectSearchResult(result)
-                                }
-                            } label: {
-                                SearchResultRow(result: result)
-                            }
-                            .buttonStyle(.plain)
+                        ForEach(primaryResults) { result in
+                            searchResultButton(result)
 
-                            if result.id != results.last?.id {
+                            if result.id != primaryResults.last?.id || !relatedResults.isEmpty {
                                 Divider()
                                     .padding(.leading, 48)
+                            }
+                        }
+
+                        if !relatedResults.isEmpty {
+                            Text(L10n.string("Related results"))
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(VibeDesign.secondaryText)
+                                .textCase(.uppercase)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 9)
+
+                            ForEach(relatedResults) { result in
+                                searchResultButton(result)
+
+                                if result.id != relatedResults.last?.id {
+                                    Divider()
+                                        .padding(.leading, 48)
+                                }
                             }
                         }
                     }
@@ -87,11 +98,11 @@ struct SearchOverlayView: View {
                 .frame(maxHeight: maxHeight)
             } else if viewModel.didFilterSearchResultsToEmpty {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("No results match those vibes yet.")
+                    Text(L10n.string("No results match those vibes yet."))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(VibeDesign.primaryText)
 
-                    Text("Clear a chip or try another nearby search.")
+                    Text(L10n.string("Clear a chip or try another nearby search."))
                         .font(.caption)
                         .foregroundStyle(VibeDesign.secondaryText)
                 }
@@ -116,6 +127,19 @@ struct SearchOverlayView: View {
         .shadow(color: .black.opacity(0.10), radius: 14, y: 8)
     }
 
+    private func searchResultButton(_ result: PlaceSearchResult) -> some View {
+        Button {
+            isFieldFocused = false
+            isSearchFocused = false
+            Task {
+                await viewModel.selectSearchResult(result)
+            }
+        } label: {
+            SearchResultRow(result: result)
+        }
+        .buttonStyle(.plain)
+    }
+
     private func resultsMaxHeight(in geometry: GeometryProxy) -> CGFloat {
         let controlsHeight: CGFloat = 48 + 8 + 30 + 8
         let reservedBottom: CGFloat = isFieldFocused ? 330 : 150
@@ -135,7 +159,7 @@ struct SearchOverlayView: View {
 
             ZStack(alignment: .leading) {
                 if viewModel.searchQuery.isEmpty {
-                    Text("Search a place...")
+                    Text(L10n.string("Search a place..."))
                         .foregroundStyle(VibeDesign.brandYellow.opacity(0.70))
                         .lineLimit(1)
                 }
@@ -170,7 +194,7 @@ struct SearchOverlayView: View {
                         .foregroundStyle(VibeDesign.brandYellow.opacity(0.86))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Hide keyboard")
+                .accessibilityLabel(L10n.string("Hide keyboard"))
             }
 
             if !viewModel.searchQuery.isEmpty {
@@ -183,7 +207,7 @@ struct SearchOverlayView: View {
                         .foregroundStyle(VibeDesign.brandYellow.opacity(0.86))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
+                .accessibilityLabel(L10n.string("Clear search"))
             }
         }
         .padding(.horizontal, 14)
@@ -200,7 +224,7 @@ struct SearchOverlayView: View {
     private func vibeFilters(containerWidth: CGFloat) -> some View {
         if usesExpandedFilterLayout(containerWidth: containerWidth) {
             HStack(spacing: 8) {
-                filterButton(title: "All", vibe: nil, isExpanded: true)
+                filterButton(title: L10n.string("All"), vibe: nil, isExpanded: true)
 
                 ForEach(VibeTag.bestToWorst(viewModel.allowedVibes)) { vibe in
                     filterButton(title: expandedFilterTitle(for: vibe), vibe: vibe, isExpanded: true)
@@ -210,7 +234,7 @@ struct SearchOverlayView: View {
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 7) {
-                    filterButton(title: "All", vibe: nil, isExpanded: false)
+                    filterButton(title: L10n.string("All"), vibe: nil, isExpanded: false)
 
                     ForEach(VibeTag.bestToWorst(viewModel.allowedVibes)) { vibe in
                         filterButton(title: vibe.mapLabel, vibe: vibe, isExpanded: false)
@@ -249,7 +273,34 @@ struct SearchOverlayView: View {
     }
 
     private func expandedFilterTitle(for vibe: VibeTag) -> String {
-        switch vibe {
+        if L10n.language == .spanish {
+            switch vibe {
+            case .changedMyLife:
+                return "Me cambió\nla vida"
+            case .fire:
+                return "Está\nbrutal"
+            case .worthTheDrive:
+                return "Vale el\nviaje"
+            case .hiddenGem:
+                return "Joya\nescondida"
+            case .underrated:
+                return "Muy\nsubestimado"
+            case .bougie:
+                return "Muy\nelegante"
+            case .lowKey:
+                return "Tranqui"
+            case .touristTrap:
+                return "Trampa para\nturistas"
+            case .needsPrayer:
+                return "Que Dios\nnos ayude"
+            case .emotionallyDamaging:
+                return "Te deja\ntraumado"
+            default:
+                return vibe.displayName
+            }
+        }
+
+        return switch vibe {
         case .changedMyLife:
             "Changed\nMy Life"
         case .worthTheDrive:
@@ -263,7 +314,7 @@ struct SearchOverlayView: View {
         case .emotionallyDamaging:
             "Emotionally\nDamaging"
         default:
-            vibe.rawValue
+            vibe.displayName
         }
     }
 
@@ -316,8 +367,7 @@ private struct VibeFilterChip: View {
 
     var body: some View {
         HStack(spacing: isExpanded ? 4 : 5) {
-            Image(systemName: symbolName)
-                .font(.system(size: iconSize, weight: .black))
+            filterIcon
                 .foregroundStyle(isSelected ? .white : iconColor)
                 .frame(width: iconFrameWidth)
 
@@ -340,8 +390,14 @@ private struct VibeFilterChip: View {
         .shadow(color: isSelected ? VibeDesign.pressedShadow : .black.opacity(0.06), radius: 8, y: 3)
     }
 
-    private var symbolName: String {
-        vibe?.visualStyle.symbolName ?? "circle.grid.2x2.fill"
+    @ViewBuilder
+    private var filterIcon: some View {
+        if let vibe {
+            VibeIconImage(tag: vibe, size: iconSize)
+        } else {
+            Image(systemName: "circle.grid.2x2.fill")
+                .font(.system(size: iconSize, weight: .black))
+        }
     }
 
     private var iconColor: Color {
@@ -415,11 +471,10 @@ private struct SearchResultRow: View {
 
                 if let topVibe = result.topVibe {
                     HStack(spacing: 4) {
-                        Image(systemName: topVibe.vibeTag.visualStyle.symbolName)
-                            .font(.system(size: 10, weight: .black))
+                        VibeIconImage(tag: topVibe.vibeTag, size: 10)
                             .foregroundStyle(topVibe.vibeTag.visualStyle.color)
 
-                        Text(topVibe.vibeTag.rawValue)
+                        Text(topVibe.vibeTag.displayName)
                             .font(.caption2.weight(.heavy))
                             .foregroundStyle(VibeDesign.primaryText)
                             .lineLimit(1)
@@ -428,7 +483,7 @@ private struct SearchResultRow: View {
                             .font(.caption2.weight(.heavy))
                             .foregroundStyle(topVibe.vibeTag.visualStyle.color)
 
-                        Text("· \(result.vibeCount) \(result.vibeCount == 1 ? "vibe" : "vibes")")
+                        Text("· \(L10n.count(result.vibeCount, singular: "%d vibe", plural: "%d vibes"))")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(VibeDesign.secondaryText)
                     }
@@ -463,8 +518,7 @@ private struct SearchResultRow: View {
                 Circle()
                     .fill(topVibe.vibeTag.visualStyle.color.opacity(0.16))
 
-                Image(systemName: topVibe.vibeTag.visualStyle.symbolName)
-                    .font(.system(size: 13, weight: .black))
+                VibeIconImage(tag: topVibe.vibeTag, size: 13)
                     .foregroundStyle(topVibe.vibeTag.visualStyle.color)
             }
             .frame(width: 28, height: 28)

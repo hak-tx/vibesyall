@@ -26,6 +26,13 @@
 	<string>$(VIBE_BETA_ACCESS_TOKEN)</string>
 	<key>CFBundleDisplayName</key>
 	<string>VIBES Y'ALL</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>es</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

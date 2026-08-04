@@ -15,3 +15,12 @@ fastlane/report.xml
 backend/node_modules/
 backend/.wrangler/
 backend/.dev.vars
+
+# Android Studio / Gradle
+android/.gradle/
+android/.idea/
+android/local.properties
+android/secrets.properties
+android/**/build/
+android/captures/
+*.iml

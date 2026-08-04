@@ -8,8 +8,81 @@ protocol PlaceSearching {
     func pointOfInterestChoices(named title: String?, near coordinate: CLLocationCoordinate2D) async throws -> [PlaceCandidateMatch]
 }
 
+enum PlaceNameMatchTier: Int, Comparable {
+    case exact
+    case phrasePrefix
+    case orderedTokenPrefix
+    case sharedFullTokens
+    case none
+
+    static func < (lhs: PlaceNameMatchTier, rhs: PlaceNameMatchTier) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+
+    var isStrongMatch: Bool { self != .none }
+}
+
+enum PlaceNameSearchMatcher {
+    static func matchTier(query: String, candidateName: String) -> PlaceNameMatchTier {
+        let queryTokens = normalizedTokens(query)
+        let candidateTokens = normalizedTokens(candidateName)
+        guard queryTokens.count >= 2, candidateTokens.count >= queryTokens.count else {
+            return .none
+        }
+
+        if queryTokens == candidateTokens {
+            return .exact
+        }
+
+        if candidateTokens.starts(with: queryTokens) {
+            return .phrasePrefix
+        }
+
+        let orderedPrefixMatch = zip(queryTokens.indices, zip(queryTokens, candidateTokens)).allSatisfy {
+            index, pair in
+            let (queryToken, candidateToken) = pair
+            if queryToken.count <= 2 {
+                // Initials in a 2-token query must match a complete token ("Joe T"),
+                // while the final initial in a longer query may prefix a full token
+                // ("Joe T G" -> "Joe T Garcia").
+                if index < queryTokens.count - 1 || queryTokens.count == 2 {
+                    return candidateToken == queryToken
+                }
+            }
+            return candidateToken.hasPrefix(queryToken)
+        }
+        if orderedPrefixMatch {
+            return .orderedTokenPrefix
+        }
+
+        // Reordered full words are useful for names such as "Houston Museum" without
+        // allowing initials or arbitrary substrings to become fuzzy matches.
+        if queryTokens.allSatisfy({ $0.count >= 3 && candidateTokens.contains($0) }) {
+            return .sharedFullTokens
+        }
+
+        return .none
+    }
+
+    static func normalized(_ value: String) -> String {
+        normalizedTokens(value).joined(separator: " ")
+    }
+
+    static func normalizedTokens(_ value: String) -> [String] {
+        let folded = value
+            .folding(options: [.diacriticInsensitive, .widthInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .lowercased()
+            .replacingOccurrences(of: "['’]s\\b", with: "", options: .regularExpression)
+
+        return folded
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+    }
+}
+
 struct HybridPlaceSearchService: PlaceSearching {
     private static let providerResultLimit = 8
+    private static let broadSearchProviderRadiusMeters: CLLocationDistance = 50_000
 
     let mapKitSearch: any PlaceSearching
     let providerSearch: any ProviderPlaceSearching
@@ -33,16 +106,20 @@ struct HybridPlaceSearchService: PlaceSearching {
             return mapKitResults
         }
 
-        let providerResults = (try? await providerSearch.searchProviderPlaces(
+        let rawProviderResults = (try? await providerSearch.searchProviderPlaces(
             query: trimmedQuery,
             latitude: coordinate?.latitude,
             longitude: coordinate?.longitude,
             limit: Self.providerResultLimit
         )) ?? []
+        let providerResults = providerResultsForCurrentSearch(rawProviderResults, query: trimmedQuery)
 
         let mergedResults = Array(
             (mapKitResults + providerResults)
-                .sortedBySearchRelevance(query: trimmedQuery)
+                .sortedBySearchRelevance(
+                    query: trimmedQuery,
+                    preferDistance: PlaceSearchQueryIntent.prefersDistanceRanking(for: trimmedQuery)
+                )
                 .uniquedByCandidateIdentity()
                 .prefix(10)
         )
@@ -67,18 +144,28 @@ struct HybridPlaceSearchService: PlaceSearching {
             return true
         }
 
-        let normalizedQuery = normalized(query)
-        let queryTokens = normalizedQuery.split(separator: " ").map(String.init)
-        guard !normalizedQuery.isEmpty, !queryTokens.isEmpty else {
+        let normalizedQuery = PlaceNameSearchMatcher.normalized(query)
+        guard !normalizedQuery.isEmpty else {
             return false
         }
 
         return !mapKitResults.prefix(3).contains { candidate in
-            let normalizedName = normalized(candidate.name)
-            return normalizedName == normalizedQuery ||
-                normalizedName.hasPrefix(normalizedQuery) ||
-                queryTokens.allSatisfy { normalizedName.contains($0) }
+            PlaceNameSearchMatcher.matchTier(query: query, candidateName: candidate.name).isStrongMatch
         }
+    }
+
+    private func providerResultsForCurrentSearch(_ results: [PlaceCandidate], query: String) -> [PlaceCandidate] {
+        if PlaceSearchQueryIntent.isSpecificNameSearch(query) {
+            return results.filter {
+                PlaceNameSearchMatcher.matchTier(query: query, candidateName: $0.name).isStrongMatch
+            }
+        }
+
+        guard PlaceSearchQueryIntent.prefersDistanceRanking(for: query) else {
+            return results
+        }
+
+        return results.filter { ($0.distanceMeters ?? .greatestFiniteMagnitude) <= Self.broadSearchProviderRadiusMeters }
     }
 
     private func normalized(_ value: String) -> String {
@@ -87,6 +174,145 @@ struct HybridPlaceSearchService: PlaceSearching {
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
+    }
+}
+
+enum PlaceSearchQueryIntent {
+    private static let broadIntentTokens: Set<String> = [
+        "atm",
+        "asian",
+        "bakery",
+        "bar",
+        "bars",
+        "bbq",
+        "breakfast",
+        "brewery",
+        "burger",
+        "burgers",
+        "cafe",
+        "cafes",
+        "cajun",
+        "chinese",
+        "coffee",
+        "dinner",
+        "drink",
+        "drinks",
+        "entertainment",
+        "food",
+        "gas",
+        "grocery",
+        "groceries",
+        "gym",
+        "hotel",
+        "hotels",
+        "italian",
+        "lunch",
+        "mexican",
+        "movie",
+        "movies",
+        "museum",
+        "museums",
+        "park",
+        "parks",
+        "pharmacy",
+        "pizza",
+        "restaurant",
+        "restaurants",
+        "shop",
+        "shopping",
+        "shops",
+        "store",
+        "stores",
+        "taco",
+        "tacos",
+        "theater",
+        "theatre"
+    ]
+
+    static func allowsWideFallback(for query: String) -> Bool {
+        let tokens = normalizedTokens(for: query)
+        guard !tokens.isEmpty else {
+            return false
+        }
+
+        if isBroadLocalSearch(tokens) {
+            return false
+        }
+
+        return tokens.count >= 2 || (tokens.first?.count ?? 0) >= 7
+    }
+
+    static func prefersDistanceRanking(for query: String) -> Bool {
+        isBroadLocalSearch(normalizedTokens(for: query))
+    }
+
+    static func isSpecificNameSearch(_ query: String) -> Bool {
+        let tokens = normalizedTokens(for: query)
+        return tokens.count >= 2 &&
+            !isBroadLocalSearch(tokens) &&
+            query.rangeOfCharacter(from: .decimalDigits) == nil
+    }
+
+    private static func isBroadLocalSearch(_ tokens: [String]) -> Bool {
+        guard !tokens.isEmpty else {
+            return false
+        }
+
+        return tokens.allSatisfy { token in
+            broadIntentTokens.contains(token) ||
+                (token.hasSuffix("s") && broadIntentTokens.contains(String(token.dropLast())))
+        }
+    }
+
+    private static func normalizedTokens(for query: String) -> [String] {
+        query
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+    }
+}
+
+@MainActor
+private final class MapKitCompletionCollector: NSObject, @preconcurrency MKLocalSearchCompleterDelegate {
+    private let completer = MKLocalSearchCompleter()
+    private var continuation: CheckedContinuation<[MKLocalSearchCompletion], Never>?
+    private var didFinish = false
+
+    override init() {
+        super.init()
+        completer.delegate = self
+        completer.resultTypes = .pointOfInterest
+    }
+
+    func collect(query: String, region: MKCoordinateRegion?) async -> [MKLocalSearchCompletion] {
+        if let region {
+            completer.region = region
+        }
+
+        return await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            completer.queryFragment = query
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(450))
+                self?.finish(with: self?.completer.results ?? [])
+            }
+        }
+    }
+
+    func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
+        guard !completer.results.isEmpty else { return }
+        finish(with: completer.results)
+    }
+
+    func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
+        finish(with: [])
+    }
+
+    private func finish(with results: [MKLocalSearchCompletion]) {
+        guard !didFinish else { return }
+        didFinish = true
+        continuation?.resume(returning: results)
+        continuation = nil
     }
 }
 
@@ -100,19 +326,38 @@ struct MapKitPlaceSearchService: PlaceSearching {
     func search(query: String, near coordinate: CLLocationCoordinate2D?) async throws -> [PlaceCandidate] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         var candidates: [PlaceCandidate] = []
+        var localCandidates: [PlaceCandidate] = []
         var searchErrors: [Error] = []
 
         if let coordinate {
+            do {
+                localCandidates = try await searchCandidates(
+                    query: trimmedQuery,
+                    origin: coordinate,
+                    region: MKCoordinateRegion(
+                        center: coordinate,
+                        latitudinalMeters: Self.localSearchRadiusMeters,
+                        longitudinalMeters: Self.localSearchRadiusMeters
+                    )
+                )
+                if PlaceSearchQueryIntent.prefersDistanceRanking(for: trimmedQuery) {
+                    localCandidates = localCandidates.filter { candidate in
+                        (candidate.distanceMeters ?? .greatestFiniteMagnitude) <= Self.localSearchRadiusMeters
+                    }
+                }
+                candidates.append(contentsOf: localCandidates)
+            } catch {
+                searchErrors.append(error)
+            }
+        }
+
+        if coordinate == nil || shouldSearchBeyondLocalRegion(query: trimmedQuery, localCandidates: localCandidates) {
             do {
                 candidates.append(
                     contentsOf: try await searchCandidates(
                         query: trimmedQuery,
                         origin: coordinate,
-                        region: MKCoordinateRegion(
-                            center: coordinate,
-                            latitudinalMeters: Self.localSearchRadiusMeters,
-                            longitudinalMeters: Self.localSearchRadiusMeters
-                        )
+                        region: nil
                     )
                 )
             } catch {
@@ -120,16 +365,49 @@ struct MapKitPlaceSearchService: PlaceSearching {
             }
         }
 
-        do {
-            candidates.append(
-                contentsOf: try await searchCandidates(
-                    query: trimmedQuery,
-                    origin: coordinate,
-                    region: nil
+        let strongNameCandidateCount = candidates.reduce(into: 0) { count, candidate in
+            if PlaceNameSearchMatcher.matchTier(query: trimmedQuery, candidateName: candidate.name).isStrongMatch {
+                count += 1
+            }
+        }
+        if PlaceSearchQueryIntent.isSpecificNameSearch(trimmedQuery), strongNameCandidateCount < 2 {
+            let completionRegion = coordinate.map {
+                MKCoordinateRegion(
+                    center: $0,
+                    latitudinalMeters: Self.localSearchRadiusMeters * 4,
+                    longitudinalMeters: Self.localSearchRadiusMeters * 4
                 )
-            )
-        } catch {
-            searchErrors.append(error)
+            }
+            let completions = await MapKitCompletionCollector()
+                .collect(query: trimmedQuery, region: completionRegion)
+                .filter {
+                    PlaceNameSearchMatcher.matchTier(
+                        query: trimmedQuery,
+                        candidateName: $0.title
+                    ).isStrongMatch
+                }
+
+            for completion in completions.prefix(6) {
+                do {
+                    candidates.append(
+                        contentsOf: try await searchCandidates(
+                            completion: completion,
+                            origin: coordinate
+                        )
+                    )
+                } catch {
+                    searchErrors.append(error)
+                }
+            }
+        }
+
+        if PlaceSearchQueryIntent.isSpecificNameSearch(trimmedQuery) {
+            candidates = candidates.filter {
+                PlaceNameSearchMatcher.matchTier(
+                    query: trimmedQuery,
+                    candidateName: $0.name
+                ).isStrongMatch
+            }
         }
 
         guard !candidates.isEmpty else {
@@ -141,10 +419,27 @@ struct MapKitPlaceSearchService: PlaceSearching {
 
         return Array(
             candidates
-                .sortedBySearchRelevance(query: trimmedQuery)
+                .sortedBySearchRelevance(
+                    query: trimmedQuery,
+                    preferDistance: PlaceSearchQueryIntent.prefersDistanceRanking(for: trimmedQuery)
+                )
                 .uniquedByCandidateIdentity()
                 .prefix(10)
         )
+    }
+
+    private func shouldSearchBeyondLocalRegion(query: String, localCandidates: [PlaceCandidate]) -> Bool {
+        guard PlaceSearchQueryIntent.allowsWideFallback(for: query) else {
+            return false
+        }
+
+        guard !localCandidates.isEmpty else {
+            return true
+        }
+
+        return !localCandidates.prefix(3).contains { candidate in
+            PlaceNameSearchMatcher.matchTier(query: query, candidateName: candidate.name).isStrongMatch
+        }
     }
 
     private func searchCandidates(
@@ -163,6 +458,16 @@ struct MapKitPlaceSearchService: PlaceSearching {
         let response = try await MKLocalSearch(request: request).start()
         return response.mapItems
             .map { candidate(for: $0, origin: origin) }
+    }
+
+    private func searchCandidates(
+        completion: MKLocalSearchCompletion,
+        origin: CLLocationCoordinate2D?
+    ) async throws -> [PlaceCandidate] {
+        let request = MKLocalSearch.Request(completion: completion)
+        request.resultTypes = .pointOfInterest
+        let response = try await MKLocalSearch(request: request).start()
+        return response.mapItems.map { candidate(for: $0, origin: origin) }
     }
 
     func pointOfInterestChoices(for selectedItem: MKMapItem) async throws -> [PlaceCandidateMatch] {
@@ -513,27 +818,25 @@ struct MapKitPlaceSearchService: PlaceSearching {
 }
 
 private extension Array where Element == PlaceCandidate {
-    func sortedBySearchRelevance(query: String) -> [PlaceCandidate] {
+    func sortedBySearchRelevance(query: String, preferDistance: Bool = false) -> [PlaceCandidate] {
         sorted { lhs, rhs in
             let lhsRelevance = Self.searchRelevance(for: lhs, query: query)
             let rhsRelevance = Self.searchRelevance(for: rhs, query: query)
+
+            if preferDistance,
+               let distanceComparison = Self.distanceComparison(lhs: lhs, rhs: rhs, minimumDelta: 250) {
+                return distanceComparison
+            }
+
             if lhsRelevance != rhsRelevance {
                 return lhsRelevance < rhsRelevance
             }
 
-            switch (lhs.distanceMeters, rhs.distanceMeters) {
-            case let (lhsDistance?, rhsDistance?):
-                if abs(lhsDistance - rhsDistance) > 25 {
-                    return lhsDistance < rhsDistance
-                }
-                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-            case (.some, nil):
-                return true
-            case (nil, .some):
-                return false
-            case (nil, nil):
-                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            if let distanceComparison = Self.distanceComparison(lhs: lhs, rhs: rhs, minimumDelta: 25) {
+                return distanceComparison
             }
+
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
     }
 
@@ -545,6 +848,10 @@ private extension Array where Element == PlaceCandidate {
     }
 
     private static func searchRelevance(for candidate: PlaceCandidate, query: String) -> Int {
+        if PlaceSearchQueryIntent.isSpecificNameSearch(query) {
+            return PlaceNameSearchMatcher.matchTier(query: query, candidateName: candidate.name).rawValue
+        }
+
         let normalizedQuery = normalized(query)
         guard !normalizedQuery.isEmpty else {
             return 5
@@ -588,6 +895,22 @@ private extension Array where Element == PlaceCandidate {
         return 4
     }
 
+    private static func distanceComparison(lhs: PlaceCandidate, rhs: PlaceCandidate, minimumDelta: CLLocationDistance) -> Bool? {
+        switch (lhs.distanceMeters, rhs.distanceMeters) {
+        case let (lhsDistance?, rhsDistance?):
+            guard abs(lhsDistance - rhsDistance) > minimumDelta else {
+                return nil
+            }
+            return lhsDistance < rhsDistance
+        case (.some, nil):
+            return true
+        case (nil, .some):
+            return false
+        case (nil, nil):
+            return nil
+        }
+    }
+
     private static func identityKey(for candidate: PlaceCandidate) -> String {
         let normalizedName = normalized(candidate.name)
         if !normalizedName.isEmpty {
@@ -611,11 +934,7 @@ private extension Array where Element == PlaceCandidate {
     }
 
     private static func normalized(_ value: String) -> String {
-        value
-            .lowercased()
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+        PlaceNameSearchMatcher.normalized(value)
     }
 }
 

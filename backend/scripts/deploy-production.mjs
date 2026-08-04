@@ -298,6 +298,33 @@ run("Applying place category quality fixes", "npx", [
   "--file=./migrations/2026-07-05-place-category-quality-fixes.sql",
   "--yes",
 ]);
+run("Ensuring V2 vibe taxonomy", "npx", [
+  "wrangler",
+  "d1",
+  "execute",
+  "vibe-map",
+  "--remote",
+  "--file=./migrations/2026-07-09-vibe-taxonomy-v4.sql",
+  "--yes",
+]);
+run("Migrating Worth It to Low-key", "npx", [
+  "wrangler",
+  "d1",
+  "execute",
+  "vibe-map",
+  "--remote",
+  "--file=./migrations/2026-07-25-worth-it-to-low-key.sql",
+  "--yes",
+]);
+run("Ensuring durable aggregate refresh jobs", "npx", [
+  "wrangler",
+  "d1",
+  "execute",
+  "vibe-map",
+  "--remote",
+  "--file=./migrations/2026-07-26-aggregate-refresh-jobs.sql",
+  "--yes",
+]);
 run("Recomputing primary display vibes", "npx", [
   "wrangler",
   "d1",

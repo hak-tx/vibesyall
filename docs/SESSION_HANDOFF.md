@@ -40,6 +40,8 @@ Canonical active tags:
 - Iconic
 - Hidden Gem
 - Underrated
+- Bougie
+- Low-key
 - Mid
 - Chaos
 - Overrated
@@ -47,7 +49,7 @@ Canonical active tags:
 - Needs Prayer
 - Emotionally Damaging
 
-The backend normalizes legacy labels to current tags. Do not lose old data when tag names change.
+The backend normalizes legacy labels to current tags. Do not lose old data when tag names change. `Worth It` was replaced by canonical `low_key` / `Low-key` in `vibes_v3` on 2026-07-25. Existing rows were migrated, while `Worth It` and `worth_it` remain accepted input aliases so older installed builds can still submit successfully.
 
 ## iOS UX Decisions
 
@@ -118,11 +120,13 @@ The backend normalizes legacy labels to current tags. Do not lose old data when 
 - Analytics tables are `analytics_devices`, `analytics_device_days`, and `analytics_events`.
 - Admin-only device labels live in `admin_device_labels`; the dashboard defaults to excluding rows marked `excluded_from_core_metrics` so Brian/Rich seed activity can be filtered out before public launch.
 - Analytics is first-party and anonymous. It stores app opens, search result counts without raw search text, place selections, account-flow events, and server-side vibe submissions.
-- The admin dashboard reads saved-vibe top-line metrics and the 30-day vibe-history chart directly from `vibe_events`, so seed submissions made before analytics tracking still appear in submitted-vibe and per-device summaries. Search/app-open metrics remain analytics-only because those were not collected historically.
+- The admin dashboard reads saved-vibe top-line metrics and vibe-history charts directly from `vibe_events`, so seed submissions made before analytics tracking still appear in submitted-vibe and per-device summaries. Search/app-open metrics remain analytics-only because those were not collected historically.
+- The admin dashboard has a dashboard-wide `1 day / 7 days / 30 days` trend selector, defaulting to 30 days. It emphasizes active/new devices, devices active on two or more distinct days, active days per device, distinct place ratings per contributing user, contribution depth, search-to-place activity, and comparisons against the immediately preceding window of equal length. Internal tester exclusion remains enabled by default.
 - As of 2026-07-04, a Codex smoke event was accepted by `POST /analytics/events` and landed in remote D1.
 
 ## TestFlight / App Store
 
+- For simulator testing from Codex, use `./scripts/codex-simulator.sh`. It builds Debug, installs to the simulator, loads `VIBE_BETA_ACCESS_TOKEN` from `fastlane/.env.testflight`, and persists the token to the Debug-only simulator defaults so production API calls work.
 - For TestFlight, do not ask Brian to run Terminal. From repo root run:
 
 ```bash
@@ -130,7 +134,7 @@ The backend normalizes legacy labels to current tags. Do not lose old data when 
 ```
 
 - Quote the uploaded build number from script output before claiming success.
-- Latest TestFlight upload in this session: build `29`, uploaded 2026-07-04 after admin analytics and What's Nearby expansion changes.
+- Latest TestFlight upload: version `0.1.4` build `56`, uploaded 2026-07-26 with the current localization, Low-key taxonomy, iPad/iPhone UI, and launch-hardening client state.
 - If the script fails, report the exact blocking error.
 - App Store review asked for Guideline 2.1 information. Brian handles screenshots/screen recordings when needed, but code/App Store metadata/support links should be kept ready.
 - For review credentials, prefer a real test account in the database only if account-gated flows require it. The app is free and anonymous-first, but account creation exists after 10 vibes.

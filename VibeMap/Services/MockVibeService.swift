@@ -32,6 +32,37 @@ final class MockVibeService: VibeServicing {
             .sorted { ($0.distanceMeters ?? 0) < ($1.distanceMeters ?? 0) }
     }
 
+    func searchSavedPlaces(
+        query: String,
+        latitude: Double?,
+        longitude: Double?,
+        limit: Int,
+        deviceIdHash: String?
+    ) async throws -> [VibePlace] {
+        let normalizedQuery = normalizedPlaceName(query)
+        let origin = latitude.flatMap { latitude in
+            longitude.map { CLLocation(latitude: latitude, longitude: $0) }
+        }
+
+        return places
+            .filter { $0.hasRatings && normalizedPlaceName($0.name).contains(normalizedQuery) }
+            .map { place in
+                var result = place
+                if let origin {
+                    result.distanceMeters = origin.distance(
+                        from: CLLocation(latitude: place.latitude, longitude: place.longitude)
+                    )
+                }
+                if let deviceIdHash {
+                    result.myRating = ratings["\(place.id):\(deviceIdHash)"]
+                }
+                return result
+            }
+            .sorted { ($0.distanceMeters ?? 0) < ($1.distanceMeters ?? 0) }
+            .prefix(limit)
+            .map { $0 }
+    }
+
     func fetchMapCells(latitude: Double, longitude: Double, radius: Double, cellSize: Double, vibeFilter: VibeTag?) async throws -> [MapCellCluster] {
         let nearby = try await fetchNearby(latitude: latitude, longitude: longitude, radius: radius, vibeFilter: vibeFilter, deviceIdHash: nil)
         guard !nearby.isEmpty else { return [] }
@@ -163,6 +194,58 @@ final class MockVibeService: VibeServicing {
             rating: rating,
             discovery: RatingDiscovery(wasFirstVibe: wasFirstVibe)
         )
+    }
+
+    func deleteRating(placeId: String, deviceIdHash: String) async throws -> VibePlace {
+        guard let index = places.firstIndex(where: { $0.id == placeId }) else {
+            throw APIError.server("That spot wandered off.")
+        }
+
+        let key = "\(placeId):\(deviceIdHash)"
+        guard let previousRating = ratings.removeValue(forKey: key) else {
+            var place = places[index]
+            place.myRating = nil
+            return place
+        }
+
+        let previousStats = places[index].stats ?? PlaceStats(
+            ratingCount: 0,
+            averageScore: 0,
+            topVibeTag: nil,
+            topVibes: nil
+        )
+        let ratingCount = max(0, previousStats.ratingCount - 1)
+        var counts = Dictionary(uniqueKeysWithValues: previousStats.visibleTopVibes.map { ($0.vibeTag, $0.count) })
+        for tag in previousRating.selectedVibeTags {
+            counts[tag, default: 0] = max(0, counts[tag, default: 0] - 1)
+        }
+        let topVibes = counts
+            .filter { $0.value > 0 }
+            .sorted { lhs, rhs in
+                lhs.value == rhs.value ? lhs.key.rawValue < rhs.key.rawValue : lhs.value > rhs.value
+            }
+            .map { tag, count in
+                VibeBreakdown(
+                    vibeTag: tag,
+                    count: count,
+                    percentage: ratingCount > 0 ? Int((Double(count) / Double(ratingCount) * 100).rounded()) : 0
+                )
+            }
+        let previousTotalScore = previousStats.averageScore * Double(previousStats.ratingCount)
+        let averageScore = ratingCount > 0
+            ? max(0, previousTotalScore - previousRating.score) / Double(ratingCount)
+            : 0
+
+        places[index].stats = PlaceStats(
+            ratingCount: ratingCount,
+            averageScore: averageScore,
+            topVibeTag: topVibes.first?.vibeTag,
+            topVibes: topVibes,
+            recentVibeCount: previousStats.recentVibeCount,
+            recentPositivePercentage: previousStats.recentPositivePercentage
+        )
+        places[index].myRating = nil
+        return places[index]
     }
 
     func fetchAccountEligibility(deviceIdHash: String) async throws -> AccountEligibility {

@@ -18,7 +18,7 @@ Returns service health and the active data-model marker.
 
 ## GET /vibes/tags
 
-Returns active canonical vibe tags in display order.
+Returns active canonical vibe tags in display order. Clients that send `X-Vibe-Taxonomy-Version: vibes_v3` or `taxonomy_version=vibes_v3` receive the current taxonomy, including `bougie` and `low_key`; older clients continue receiving the compatible V1 set. Legacy `Worth It` and `worth_it` inputs normalize to `low_key`.
 
 ```json
 {
@@ -162,6 +162,19 @@ The response returns the updated place aggregates and the saved private event su
   "discovery": {
     "was_first_vibe": false
   }
+}
+```
+
+## DELETE /ratings/:place_id
+
+Soft-deletes the current device's vibe submission for a place. Send the same
+`X-Vibe-Device-ID-Hash` header used for reads and submissions. The operation is
+idempotent and returns the refreshed place aggregates with `my_rating` removed.
+
+```json
+{
+  "deleted": true,
+  "place": {}
 }
 ```
 

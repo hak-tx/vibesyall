@@ -21,10 +21,23 @@ targets:
         INFOPLIST_FILE: VibeMap/Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        MARKETING_VERSION: 0.1.2
-        CURRENT_PROJECT_VERSION: 40
+        MARKETING_VERSION: 0.1.5
+        CURRENT_PROJECT_VERSION: 61
         TARGETED_DEVICE_FAMILY: "1,2"
         VIBE_MAP_BACKEND_BASE_URL: "https://api.vibesyall.com"
+  VibeMapTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - VibeMapTests
+    dependencies:
+      - target: VibeMap
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.brianhakel.vibemap.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/VibeMap.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/VibeMap"
+        BUNDLE_LOADER: "$(TEST_HOST)"
 
 schemes:
   VibeMap:
@@ -33,6 +46,10 @@ schemes:
         VibeMap: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - VibeMapTests
   VibeMap Demo:
     build:
       targets:
