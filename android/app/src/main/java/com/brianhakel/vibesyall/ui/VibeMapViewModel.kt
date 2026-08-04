@@ -71,6 +71,11 @@ class VibeMapViewModel(
     private val placesRepository: GooglePlacesRepository,
     private val locationRepository: LocationRepository,
 ) : ViewModel() {
+    private companion object {
+        const val MAX_VISIBLE_PLACES = 48
+        const val MAX_VISIBLE_CELLS = 32
+    }
+
     private val mutableState = MutableStateFlow(VibeMapUiState())
     val state: StateFlow<VibeMapUiState> = mutableState.asStateFlow()
 
@@ -147,7 +152,7 @@ class VibeMapViewModel(
                 .onSuccess { places ->
                     mutableState.update {
                         it.copy(
-                            nearbyPlaces = places,
+                            nearbyPlaces = places.nearestTo(center, MAX_VISIBLE_PLACES),
                             mapCells = emptyList(),
                             isLoadingMap = false,
                             errorMessage = null,
@@ -184,10 +189,16 @@ class VibeMapViewModel(
                         else -> 220_000.0
                     }
                     val cells = api.fetchMapCells(center.latitude, center.longitude, radius, cellSize, filter, mutableState.value.tags)
-                    mutableState.update { it.copy(mapCells = cells.take(56), nearbyPlaces = emptyList(), isLoadingMap = false) }
+                    mutableState.update { it.copy(mapCells = cells.take(MAX_VISIBLE_CELLS), nearbyPlaces = emptyList(), isLoadingMap = false) }
                 } else {
                     val places = api.fetchNearby(center.latitude, center.longitude, radius, filter, includeDevice = false)
-                    mutableState.update { it.copy(nearbyPlaces = places, mapCells = emptyList(), isLoadingMap = false) }
+                    mutableState.update {
+                        it.copy(
+                            nearbyPlaces = places.nearestTo(center, MAX_VISIBLE_PLACES),
+                            mapCells = emptyList(),
+                            isLoadingMap = false,
+                        )
+                    }
                 }
             }.onFailure(::showError)
         }
@@ -431,6 +442,15 @@ class VibeMapViewModel(
         zoom >= 4 -> 1_600_000.0
         else -> 2_500_000.0
     }
+
+    private fun List<VibePlace>.nearestTo(center: LatLng, limit: Int): List<VibePlace> =
+        sortedBy { place ->
+            place.distanceMeters ?: run {
+                val latitudeMeters = (place.latitude - center.latitude) * 111_000.0
+                val longitudeMeters = (place.longitude - center.longitude) * 111_000.0 * kotlin.math.cos(Math.toRadians(center.latitude))
+                kotlin.math.hypot(latitudeMeters, longitudeMeters)
+            }
+        }.take(limit)
 
     private fun showError(error: Throwable) {
         if (error is CancellationException) return

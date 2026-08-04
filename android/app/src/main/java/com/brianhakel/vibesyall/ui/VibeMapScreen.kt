@@ -141,7 +141,6 @@ import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapType
 import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerComposable
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
@@ -343,35 +342,37 @@ private fun VibesGoogleMap(state: VibeMapUiState, viewModel: VibeMapViewModel) {
         onPOIClick = viewModel::selectMapPoint,
         onMapLoaded = { mapLoaded = true },
     ) {
-        state.nearbyPlaces.forEach { place ->
-            MarkerComposable(
-                keys = arrayOf<Any>(place.id, place.topVibe?.tag?.id.orEmpty(), state.selectedPlace?.id == place.id),
-                state = MarkerState(LatLng(place.latitude, place.longitude)),
-                title = place.name,
-                snippet = place.topVibe?.let { "${it.tag.emoji} ${it.tag.displayName} · ${place.vibeCount} vibes" },
-                onClick = {
-                    viewModel.selectNearbyPlace(place)
-                    true
-                },
-            ) {
-                VibeMapMarker(
-                    tag = place.topVibe?.tag,
-                    selected = state.selectedPlace?.id == place.id,
-                )
+        if (!cameraState.isMoving) {
+            state.nearbyPlaces.forEach { place ->
+                MarkerComposable(
+                    keys = arrayOf<Any>(place.id, place.topVibe?.tag?.id.orEmpty(), state.selectedPlace?.id == place.id),
+                    state = MarkerState(LatLng(place.latitude, place.longitude)),
+                    title = place.name,
+                    snippet = place.topVibe?.let { "${it.tag.emoji} ${it.tag.displayName} · ${place.vibeCount} vibes" },
+                    onClick = {
+                        viewModel.selectNearbyPlace(place)
+                        true
+                    },
+                ) {
+                    VibeMapMarker(
+                        tag = place.topVibe?.tag,
+                        selected = state.selectedPlace?.id == place.id,
+                    )
+                }
             }
-        }
-        state.mapCells.forEach { cell ->
-            MarkerComposable(
-                keys = arrayOf<Any>(cell.id, cell.topVibe?.id.orEmpty(), cell.count),
-                state = MarkerState(LatLng(cell.latitude, cell.longitude)),
-                title = "${cell.count} vibed places",
-                snippet = cell.topVibe?.let { "${it.emoji} ${it.displayName} · ${cell.totalVibes} vibes" },
-                onClick = {
-                    viewModel.focusMapCell(cell)
-                    true
-                },
-            ) {
-                VibeMapMarker(tag = cell.topVibe, count = cell.count, regional = true)
+            state.mapCells.forEach { cell ->
+                MarkerComposable(
+                    keys = arrayOf<Any>(cell.id, cell.topVibe?.id.orEmpty(), cell.count),
+                    state = MarkerState(LatLng(cell.latitude, cell.longitude)),
+                    title = "${cell.count} vibed places",
+                    snippet = cell.topVibe?.let { "${it.emoji} ${it.displayName} · ${cell.totalVibes} vibes" },
+                    onClick = {
+                        viewModel.focusMapCell(cell)
+                        true
+                    },
+                ) {
+                    VibeMapMarker(tag = cell.topVibe, count = cell.count, regional = true)
+                }
             }
         }
     }
