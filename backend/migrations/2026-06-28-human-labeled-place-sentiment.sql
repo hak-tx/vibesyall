@@ -214,15 +214,9 @@ SELECT
   'active'
 FROM mapped_ratings
 WHERE 1 = 1
-ON CONFLICT(place_id, anonymous_user_id) DO UPDATE SET
-  primary_vibe_tag_id = excluded.primary_vibe_tag_id,
-  secondary_vibe_tag_id = CASE
-    WHEN excluded.secondary_vibe_tag_id = excluded.primary_vibe_tag_id THEN NULL
-    ELSE excluded.secondary_vibe_tag_id
-  END,
-  updated_at = excluded.updated_at,
-  is_deleted = 0,
-  moderation_status = 'active';
+-- This is a legacy import only. Existing vibe_events are authoritative and
+-- must never be overwritten, reactivated, or stripped of a third vibe.
+ON CONFLICT(place_id, anonymous_user_id) DO NOTHING;
 
 DELETE FROM place_vibe_stats;
 

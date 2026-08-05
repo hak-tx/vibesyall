@@ -4,9 +4,10 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "check": "npm run typecheck && npm run typecheck:test && npm test && wrangler deploy --dry-run",
+    "check": "npm run typecheck && npm run typecheck:test && npm test && npm run test:deploy-safety && wrangler deploy --dry-run",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:deploy-safety": "node --test ./test/deploy-production.spec.mjs",
     "deploy": "wrangler deploy",
     "deploy:dry-run": "wrangler deploy --dry-run",
     "deploy:production": "node ./scripts/deploy-production.mjs",

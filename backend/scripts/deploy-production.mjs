@@ -199,33 +199,8 @@ run("Ensuring third vibe index", "npx", [
   "--command=CREATE INDEX IF NOT EXISTS idx_vibe_events_third_tag ON vibe_events(third_vibe_tag_id)",
   "--yes",
 ]);
-run("Migrating vibe taxonomy data", "npx", [
-  "wrangler",
-  "d1",
-  "execute",
-  "vibe-map",
-  "--remote",
-  "--file=./migrations/2026-06-26-vibe-taxonomy-v2.sql",
-  "--yes",
-]);
-run("Migrating human-labeled sentiment data model", "npx", [
-  "wrangler",
-  "d1",
-  "execute",
-  "vibe-map",
-  "--remote",
-  "--file=./migrations/2026-06-28-human-labeled-place-sentiment.sql",
-  "--yes",
-]);
-run("Normalizing V3 vibe taxonomy", "npx", [
-  "wrangler",
-  "d1",
-  "execute",
-  "vibe-map",
-  "--remote",
-  "--file=./migrations/2026-06-28-vibe-taxonomy-v3.sql",
-  "--yes",
-]);
+// Historical data backfills are intentionally excluded from routine deploys.
+// Replaying them can overwrite vibe_events, which is the source of truth.
 run("Removing unreviewed place records", "npx", [
   "wrangler",
   "d1",
